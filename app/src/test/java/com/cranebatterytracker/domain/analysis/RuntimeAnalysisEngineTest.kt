@@ -279,20 +279,48 @@ class RuntimeAnalysisEngineTest {
 
     @Test
     fun `a reboot mid-interval downgrades an otherwise-clean cycle from exact to shift-interrupted`() {
-        // The tablet rebooted between install and removal - the wall clock never jumped
-        // (no tampering, no SYSTEM_TIME_WARNING needed), but the monotonic elapsed-time
-        // timeline was broken, so the cycle can no longer be certified as EXACT.
+        // The tablet rebooted between install and removal - marked on an *intermediate*
+        // confirmation, not the install itself, since monotonicContinuityBroken on an
+        // event means the gap happened before that event, not after it. The wall clock
+        // never jumped (no tampering, no SYSTEM_TIME_WARNING needed), but the monotonic
+        // elapsed-time timeline was broken partway through, so the cycle can no longer be
+        // certified as EXACT.
         val start = millisAt(2024, 1, 1, 6, 0)
+        val rebootTime = millisAt(2024, 1, 1, 8, 0)
         val end = millisAt(2024, 1, 1, 10, 0)
-        val installEvent = testBatteryChange(start, RemoteId.WEST, null, 2).map {
-            if (it.eventType == EventType.BATTERY_INSTALLED) it.copy(monotonicContinuityBroken = true) else it
-        }
-        val events = installEvent + testBatteryChange(end, RemoteId.WEST, 2, 3)
+        val install = testBatteryChange(start, RemoteId.WEST, null, 2)
+        val rebootMarker = testEvent(
+            timestamp = rebootTime,
+            remoteId = RemoteId.WEST,
+            batteryId = 2,
+            eventType = EventType.STATE_CONFIRMED
+        ).copy(monotonicContinuityBroken = true)
+        val events = install + listOf(rebootMarker) + testBatteryChange(end, RemoteId.WEST, 2, 3)
 
         val cycle = engine.deriveCycles(events).single { it.batteryId == 2 }
 
         assertEquals(RuntimeClassification.SHIFT_INTERRUPTED, cycle.classification)
         assertFalse(cycle.includedInPrimaryStatistics)
+    }
+
+    @Test
+    fun `an interval opened by the very event that detected the reboot is not tainted by its own start`() {
+        // monotonicContinuityBroken on an event means continuity was lost *before* that
+        // event - it says nothing about the brand-new interval the same event opens,
+        // which runs entirely forward on the post-reboot monotonic clock with no internal
+        // gap. Only whatever was already open at that instant (poisoned via the top-of-
+        // loop check) should be tainted; the freshly-opened interval must not inherit it.
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val end = millisAt(2024, 1, 1, 10, 0)
+        val rebootInstall = testBatteryChange(start, RemoteId.WEST, null, 2).map {
+            if (it.eventType == EventType.BATTERY_INSTALLED) it.copy(monotonicContinuityBroken = true) else it
+        }
+        val events = rebootInstall + testBatteryChange(end, RemoteId.WEST, 2, 3)
+
+        val cycle = engine.deriveCycles(events).single { it.batteryId == 2 }
+
+        assertEquals(RuntimeClassification.EXACT, cycle.classification)
+        assertTrue(cycle.includedInPrimaryStatistics)
     }
 
     @Test

@@ -60,7 +60,15 @@ class RuntimeAnalysisEngine(
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
                             startSequenceNumber = event.sequenceNumber,
-                            hasClockAnomaly = event.wallClockAnomalyDetected || event.monotonicContinuityBroken,
+                            // Deliberately excludes event.monotonicContinuityBroken: that flag
+                            // means continuity was lost *before* this event (already applied
+                            // above to whatever was open at that instant, including this same
+                            // remote's just-closed interval via closeCleanDeath below) - it
+                            // says nothing about the brand-new interval that starts here and
+                            // runs entirely on the post-reboot monotonic clock going forward.
+                            // wallClockAnomalyDetected is different: it means this event's own
+                            // startTimestamp is untrustworthy, which does taint the new interval.
+                            hasClockAnomaly = event.wallClockAnomalyDetected,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
                         )
@@ -84,7 +92,10 @@ class RuntimeAnalysisEngine(
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
                             startSequenceNumber = event.sequenceNumber,
-                            hasClockAnomaly = event.wallClockAnomalyDetected || event.monotonicContinuityBroken,
+                            // See the matching comment in BATTERY_INSTALLED above: a new
+                            // interval starting here must not inherit monotonicContinuityBroken
+                            // from its own start event.
+                            hasClockAnomaly = event.wallClockAnomalyDetected,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
                         )

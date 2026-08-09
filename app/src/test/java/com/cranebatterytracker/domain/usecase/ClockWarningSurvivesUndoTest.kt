@@ -8,6 +8,7 @@ import com.cranebatterytracker.domain.model.RuntimeClassification
 import com.cranebatterytracker.testutil.FakeBatteryTrackerRepository
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,6 +53,42 @@ class ClockWarningSurvivesUndoTest {
         // still-open interval spans the clock discontinuity, so it must remain
         // contaminated: closing it later can never be classified as EXACT.
         changeUseCase(RemoteId.EAST, 4, now = 1_000 + 3_600_000L + 200, elapsedRealtimeMillis = 1_700)
+        val cycles = runtimeEngine.deriveCycles(repository.allEvents())
+        val eastCycle = cycles.single { it.remoteId == RemoteId.EAST && it.batteryId == 3 }
+        assertNotEquals(RuntimeClassification.EXACT, eastCycle.classification)
+    }
+
+    @Test
+    fun `undoing the action that detected a reboot does not erase the continuity marker`() = runTest {
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+        val undoUseCase = UndoUseCase(repository, "test")
+        val runtimeEngine = RuntimeAnalysisEngine(ShiftEngine())
+
+        // Install West and East, anchoring the monotonic clock.
+        changeUseCase(RemoteId.WEST, 1, now = 1_000, elapsedRealtimeMillis = 500_000)
+        changeUseCase(RemoteId.EAST, 3, now = 1_000, elapsedRealtimeMillis = 500_000)
+
+        // The device reboots; changing West's battery is the first interaction afterward
+        // and detects the lost monotonic continuity (no wall-clock jump at all).
+        changeUseCase(RemoteId.WEST, 2, now = 2_000, elapsedRealtimeMillis = 1_000)
+        val mistakenGroupId = repository.allEvents()
+            .last { it.eventType == EventType.BATTERY_INSTALLED && it.remoteId == RemoteId.WEST }
+            .actionGroupId!!
+        val marker = repository.allEvents().single { it.eventType == EventType.SYSTEM_TIME_WARNING }
+        assertTrue(marker.monotonicContinuityBroken)
+        assertFalse(marker.wallClockAnomalyDetected)
+
+        // Operator undoes the mistaken West battery change.
+        undoUseCase(targetActionGroupId = mistakenGroupId, now = 3_000, elapsedRealtimeMillis = 1_500)
+
+        val eventsAfterUndo = repository.allEvents()
+        val survivingMarker = eventsAfterUndo.single { it.eventType == EventType.SYSTEM_TIME_WARNING }
+        assertEquals(null, survivingMarker.actionGroupId)
+
+        // East's battery was never touched by the mistaken action or its undo, but its
+        // still-open interval spans the reboot, so closing it later can never be EXACT.
+        changeUseCase(RemoteId.EAST, 4, now = 4_000, elapsedRealtimeMillis = 2_000)
         val cycles = runtimeEngine.deriveCycles(repository.allEvents())
         val eastCycle = cycles.single { it.remoteId == RemoteId.EAST && it.batteryId == 3 }
         assertNotEquals(RuntimeClassification.EXACT, eastCycle.classification)

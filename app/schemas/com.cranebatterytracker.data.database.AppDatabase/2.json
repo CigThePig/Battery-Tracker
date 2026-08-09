@@ -1,0 +1,261 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "71e1bccdaf818cdf81e50f25fa44ee3b",
+    "entities": [
+      {
+        "tableName": "batteries",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`batteryId` INTEGER NOT NULL, `displayNumber` INTEGER NOT NULL, `active` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `retiredAt` INTEGER, PRIMARY KEY(`batteryId`))",
+        "fields": [
+          {
+            "fieldPath": "batteryId",
+            "columnName": "batteryId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayNumber",
+            "columnName": "displayNumber",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "active",
+            "columnName": "active",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "retiredAt",
+            "columnName": "retiredAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "batteryId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "remotes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`remoteId` TEXT NOT NULL, `displayName` TEXT NOT NULL, `shortName` TEXT NOT NULL, `physicalPosition` TEXT NOT NULL, `active` INTEGER NOT NULL, PRIMARY KEY(`remoteId`))",
+        "fields": [
+          {
+            "fieldPath": "remoteId",
+            "columnName": "remoteId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shortName",
+            "columnName": "shortName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "physicalPosition",
+            "columnName": "physicalPosition",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "active",
+            "columnName": "active",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "remoteId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sequenceNumber` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `eventId` TEXT NOT NULL, `actionGroupId` TEXT, `timestampEpochMillis` INTEGER NOT NULL, `remoteId` TEXT, `batteryId` INTEGER, `eventType` TEXT NOT NULL, `previousBatteryId` INTEGER, `newBatteryId` INTEGER, `targetActionGroupId` TEXT, `createdByAppVersion` TEXT NOT NULL, `wallClockAnomalyDetected` INTEGER NOT NULL, `elapsedRealtimeMillis` INTEGER, `monotonicContinuityBroken` INTEGER NOT NULL, `notes` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "sequenceNumber",
+            "columnName": "sequenceNumber",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actionGroupId",
+            "columnName": "actionGroupId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "timestampEpochMillis",
+            "columnName": "timestampEpochMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteId",
+            "columnName": "remoteId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "batteryId",
+            "columnName": "batteryId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "eventType",
+            "columnName": "eventType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previousBatteryId",
+            "columnName": "previousBatteryId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "newBatteryId",
+            "columnName": "newBatteryId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "targetActionGroupId",
+            "columnName": "targetActionGroupId",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "createdByAppVersion",
+            "columnName": "createdByAppVersion",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wallClockAnomalyDetected",
+            "columnName": "wallClockAnomalyDetected",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elapsedRealtimeMillis",
+            "columnName": "elapsedRealtimeMillis",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "monotonicContinuityBroken",
+            "columnName": "monotonicContinuityBroken",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "sequenceNumber"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_events_eventId",
+            "unique": true,
+            "columnNames": [
+              "eventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_events_eventId` ON `${TABLE_NAME}` (`eventId`)"
+          },
+          {
+            "name": "index_events_actionGroupId",
+            "unique": false,
+            "columnNames": [
+              "actionGroupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_events_actionGroupId` ON `${TABLE_NAME}` (`actionGroupId`)"
+          },
+          {
+            "name": "index_events_timestampEpochMillis",
+            "unique": false,
+            "columnNames": [
+              "timestampEpochMillis"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_events_timestampEpochMillis` ON `${TABLE_NAME}` (`timestampEpochMillis`)"
+          },
+          {
+            "name": "index_events_remoteId",
+            "unique": false,
+            "columnNames": [
+              "remoteId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_events_remoteId` ON `${TABLE_NAME}` (`remoteId`)"
+          },
+          {
+            "name": "index_events_batteryId",
+            "unique": false,
+            "columnNames": [
+              "batteryId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_events_batteryId` ON `${TABLE_NAME}` (`batteryId`)"
+          },
+          {
+            "name": "index_events_targetActionGroupId",
+            "unique": false,
+            "columnNames": [
+              "targetActionGroupId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_events_targetActionGroupId` ON `${TABLE_NAME}` (`targetActionGroupId`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '71e1bccdaf818cdf81e50f25fa44ee3b')"
+    ]
+  }
+}

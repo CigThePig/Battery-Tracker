@@ -35,6 +35,23 @@ class ConfirmStateUseCase(
             val groupId = UUID.randomUUID().toString()
 
             val events = buildList {
+                // Written first - see BatteryChangeUseCase for why a monotonic-only break
+                // needs its own group-independent marker event ordered ahead of any event
+                // that might open a new interval, rather than just the flag stamped below.
+                if (anomalyDetected) {
+                    add(systemTimeWarningEvent(remoteIds.first(), groupId, now, appVersion))
+                } else if (monotonicContinuityBroken) {
+                    add(
+                        systemTimeWarningEvent(
+                            remoteIds.first(),
+                            groupId,
+                            now,
+                            appVersion,
+                            wallClockAnomalyDetected = false,
+                            monotonicContinuityBroken = true
+                        )
+                    )
+                }
                 for (remoteId in remoteIds) {
                     val known = knowledge[remoteId] as? RemoteKnowledge.Known
                         ?: throw BatteryTrackerException.NothingToConfirm
@@ -56,7 +73,6 @@ class ConfirmStateUseCase(
                         )
                     )
                 }
-                if (anomalyDetected) add(systemTimeWarningEvent(remoteIds.first(), groupId, now, appVersion))
             }
 
             repository.writeEventGroup(events)

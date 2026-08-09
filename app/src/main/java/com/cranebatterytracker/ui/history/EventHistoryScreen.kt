@@ -37,7 +37,6 @@ fun EventHistoryScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
     // recorded later carry an earlier wall-clock timestamp; sorting by timestamp would
     // visually place it before events that actually happened first, even though the
     // domain layer replays it correctly. The wall-clock timestamp is still shown per row.
-    //
     val sortedEvents = events.filter { it.eventType != EventType.UNDO_ACTION }.sortedByDescending { it.sequenceNumber }
     val sections = sectionEventsByDayHeader(sortedEvents)
 
@@ -103,12 +102,19 @@ private fun EventRow(event: DomainEvent, remotesById: Map<com.cranebatterytracke
     }
 }
 
-private fun describeEvent(event: DomainEvent): String = when (event.eventType) {
+internal fun describeEvent(event: DomainEvent): String = when (event.eventType) {
     EventType.BATTERY_INSTALLED -> "Battery ${event.newBatteryId ?: event.batteryId} installed."
     EventType.BATTERY_REMOVED_DEAD -> "Battery ${event.batteryId} died."
     EventType.STATE_CONFIRMED -> "Battery ${event.batteryId} confirmed."
     EventType.STATE_CORRECTED -> "Corrected: Battery ${event.previousBatteryId ?: "?"} → Battery ${event.newBatteryId}."
     EventType.STATE_MARKED_UNKNOWN -> "Marked unknown."
     EventType.UNDO_ACTION -> "Undo."
-    EventType.SYSTEM_TIME_WARNING -> "Device clock anomaly detected."
+    // A reboot (monotonicContinuityBroken alone) must never be presented as a clock
+    // problem (spec review Issue 12) - only a genuine wallClockAnomalyDetected means the
+    // wall clock itself disagreed with the monotonic clock.
+    EventType.SYSTEM_TIME_WARNING -> if (event.wallClockAnomalyDetected) {
+        "Device clock anomaly detected."
+    } else {
+        "Device restarted around this point."
+    }
 }

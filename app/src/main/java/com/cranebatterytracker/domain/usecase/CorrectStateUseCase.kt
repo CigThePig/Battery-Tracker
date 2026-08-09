@@ -44,6 +44,20 @@ class CorrectStateUseCase(
                 val groupId = UUID.randomUUID().toString()
                 repository.writeEventGroup(
                     buildList {
+                        if (anomalyDetected) {
+                            add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                        } else if (monotonicContinuityBroken) {
+                            add(
+                                systemTimeWarningEvent(
+                                    remoteId,
+                                    groupId,
+                                    now,
+                                    appVersion,
+                                    wallClockAnomalyDetected = false,
+                                    monotonicContinuityBroken = true
+                                )
+                            )
+                        }
                         add(
                             DomainEvent(
                                 eventId = UUID.randomUUID().toString(),
@@ -61,7 +75,6 @@ class CorrectStateUseCase(
                                 monotonicContinuityBroken = monotonicContinuityBroken
                             )
                         )
-                        if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
                     }
                 )
                 return@inTransaction
@@ -77,6 +90,23 @@ class CorrectStateUseCase(
             val groupId = UUID.randomUUID().toString()
 
             val events = buildList {
+                // Written first - see BatteryChangeUseCase for why a monotonic-only break
+                // needs its own group-independent marker ordered ahead of STATE_CORRECTED,
+                // which is about to open a new interval that must not inherit this taint.
+                if (anomalyDetected) {
+                    add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                } else if (monotonicContinuityBroken) {
+                    add(
+                        systemTimeWarningEvent(
+                            remoteId,
+                            groupId,
+                            now,
+                            appVersion,
+                            wallClockAnomalyDetected = false,
+                            monotonicContinuityBroken = true
+                        )
+                    )
+                }
                 add(
                     DomainEvent(
                         eventId = UUID.randomUUID().toString(),
@@ -113,7 +143,6 @@ class CorrectStateUseCase(
                         )
                     )
                 }
-                if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
             }
 
             repository.writeEventGroup(events)

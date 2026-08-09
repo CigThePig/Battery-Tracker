@@ -25,6 +25,23 @@ class MarkUnknownUseCase(
 
             repository.writeEventGroup(
                 buildList {
+                    // Written first, matching the ordering convention in the other write
+                    // paths (see BatteryChangeUseCase) even though STATE_MARKED_UNKNOWN
+                    // never opens a new interval itself.
+                    if (anomalyDetected) {
+                        add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                    } else if (monotonicContinuityBroken) {
+                        add(
+                            systemTimeWarningEvent(
+                                remoteId,
+                                groupId,
+                                now,
+                                appVersion,
+                                wallClockAnomalyDetected = false,
+                                monotonicContinuityBroken = true
+                            )
+                        )
+                    }
                     add(
                         DomainEvent(
                             eventId = UUID.randomUUID().toString(),
@@ -42,7 +59,6 @@ class MarkUnknownUseCase(
                             monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
-                    if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
                 }
             )
         }

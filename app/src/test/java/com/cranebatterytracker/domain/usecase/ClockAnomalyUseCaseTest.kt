@@ -4,6 +4,7 @@ import com.cranebatterytracker.domain.model.EventType
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.testutil.FakeBatteryTrackerRepository
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -70,8 +71,13 @@ class ClockAnomalyUseCaseTest {
         val secondInstall = repository.allEvents().last { it.eventType == EventType.BATTERY_INSTALLED }
         assertTrue(secondInstall.monotonicContinuityBroken)
         assertFalse(secondInstall.wallClockAnomalyDetected)
-        // A reboot must never claim the wall clock was wrong - no alarming warning event.
-        assertTrue(repository.allEvents().none { it.eventType == EventType.SYSTEM_TIME_WARNING })
+        // A reboot must never claim the wall clock was wrong, but it still needs its own
+        // group-independent, replay-visible marker (see systemTimeWarningEvent) so undoing
+        // this battery change can never erase the evidence that continuity was lost.
+        val marker = repository.allEvents().single { it.eventType == EventType.SYSTEM_TIME_WARNING }
+        assertTrue(marker.monotonicContinuityBroken)
+        assertFalse(marker.wallClockAnomalyDetected)
+        assertEquals(null, marker.actionGroupId)
     }
 
     @Test
