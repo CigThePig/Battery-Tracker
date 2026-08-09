@@ -36,20 +36,38 @@ class SettingsRepository(private val context: Context) {
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { prefs ->
         val defaults = AppSettings()
         AppSettings(
-            dayStart = prefs[Keys.DAY_START]?.let(LocalTime::parse) ?: defaults.dayStart,
-            dayAmbiguousStart = prefs[Keys.DAY_AMBIGUOUS_START]?.let(LocalTime::parse) ?: defaults.dayAmbiguousStart,
-            dayAmbiguousEnd = prefs[Keys.DAY_AMBIGUOUS_END]?.let(LocalTime::parse) ?: defaults.dayAmbiguousEnd,
-            nightStart = prefs[Keys.NIGHT_START]?.let(LocalTime::parse) ?: defaults.nightStart,
-            nightAmbiguousStart = prefs[Keys.NIGHT_AMBIGUOUS_START]?.let(LocalTime::parse) ?: defaults.nightAmbiguousStart,
-            nightAmbiguousEnd = prefs[Keys.NIGHT_AMBIGUOUS_END]?.let(LocalTime::parse) ?: defaults.nightAmbiguousEnd,
-            workingDays = prefs[Keys.WORKING_DAYS]?.let(::parseWorkingDays) ?: defaults.workingDays,
+            dayStart = parseTimeOrDefault(prefs[Keys.DAY_START], defaults.dayStart),
+            dayAmbiguousStart = parseTimeOrDefault(prefs[Keys.DAY_AMBIGUOUS_START], defaults.dayAmbiguousStart),
+            dayAmbiguousEnd = parseTimeOrDefault(prefs[Keys.DAY_AMBIGUOUS_END], defaults.dayAmbiguousEnd),
+            nightStart = parseTimeOrDefault(prefs[Keys.NIGHT_START], defaults.nightStart),
+            nightAmbiguousStart = parseTimeOrDefault(prefs[Keys.NIGHT_AMBIGUOUS_START], defaults.nightAmbiguousStart),
+            nightAmbiguousEnd = parseTimeOrDefault(prefs[Keys.NIGHT_AMBIGUOUS_END], defaults.nightAmbiguousEnd),
+            workingDays = prefs[Keys.WORKING_DAYS]?.let { parseWorkingDays(it) ?: defaults.workingDays } ?: defaults.workingDays,
             adminPin = if (prefs[Keys.ADMIN_PIN_ENABLED] == true) prefs[Keys.ADMIN_PIN] else null,
-            dailyBackupRetentionCount = prefs[Keys.DAILY_BACKUP_RETENTION] ?: defaults.dailyBackupRetentionCount,
-            archiveBackupRetentionCount = prefs[Keys.ARCHIVE_BACKUP_RETENTION] ?: defaults.archiveBackupRetentionCount,
+            dailyBackupRetentionCount = prefs[Keys.DAILY_BACKUP_RETENTION]?.takeIf { it > 0 } ?: defaults.dailyBackupRetentionCount,
+            archiveBackupRetentionCount = prefs[Keys.ARCHIVE_BACKUP_RETENTION]?.takeIf { it > 0 } ?: defaults.archiveBackupRetentionCount,
             westDisplayName = prefs[Keys.WEST_DISPLAY_NAME] ?: defaults.westDisplayName,
             eastDisplayName = prefs[Keys.EAST_DISPLAY_NAME] ?: defaults.eastDisplayName
         )
     }
+
+    /**
+     * Every stored preference is parsed defensively (spec review Issue 16): a malformed
+     * value - from an interrupted future migration, an older app version, manual
+     * debugging, or plain storage corruption - must fall back to a known-good default
+     * rather than throwing out of this flow's map{}, which every screen that reads
+     * settings (main screen, diagnostics, battery picker, correction, backup retention)
+     * depends on.
+     */
+    private fun parseTimeOrDefault(raw: String?, default: LocalTime): LocalTime {
+        if (raw == null) return default
+        return runCatching { LocalTime.parse(raw) }.getOrDefault(default)
+    }
+
+    /** Null return (not the default) only when [raw] is present but fails to parse, so the caller can fall back. */
+    private fun parseWorkingDays(raw: String): Set<DayOfWeek>? = runCatching {
+        raw.split(",").filter { it.isNotBlank() }.map { DayOfWeek.valueOf(it.trim()) }.toSet()
+    }.getOrNull()
 
     suspend fun updateShiftTimes(
         dayStart: LocalTime,
@@ -99,7 +117,4 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.EAST_DISPLAY_NAME] = east
         }
     }
-
-    private fun parseWorkingDays(raw: String): Set<DayOfWeek> =
-        raw.split(",").filter { it.isNotBlank() }.map { DayOfWeek.valueOf(it) }.toSet()
 }

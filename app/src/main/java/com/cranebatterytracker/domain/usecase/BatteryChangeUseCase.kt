@@ -41,10 +41,41 @@ class BatteryChangeUseCase(
                 throw BatteryTrackerException.BatteryOwnedByOtherRemote(otherRemote, newBatteryId)
             }
 
-            val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
             val currentBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
+            if (currentBatteryId != null && currentBatteryId == newBatteryId) {
+                throw BatteryTrackerException.BatteryAlreadyInThisRemote(newBatteryId)
+            }
+
+            val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
+            val monotonicContinuityBroken = ClockAnomalyDetector.monotonicContinuityLost(priorEvents, elapsedRealtimeMillis)
             val groupId = UUID.randomUUID().toString()
             val events = buildList {
+                // Written first, ahead of the events below, so its sequence number is
+                // lower than theirs: RuntimeAnalysisEngine poisons whatever interval is
+                // already open at the moment it processes this marker, and a battery this
+                // same action is about to install must not exist in that "already open"
+                // set yet - if the marker were recorded after BATTERY_INSTALLED, its own
+                // poisoning pass would retroactively taint the interval that install just
+                // opened, even though that interval runs entirely on the post-reboot
+                // monotonic clock with no internal gap. A wall-clock jump takes priority
+                // over a monotonic-only break if both are somehow true at once. This is a
+                // group-independent, replay-visible marker (see systemTimeWarningEvent) -
+                // the flag stamped on the events below belongs to this action group and
+                // would be erased if the operator later undoes it.
+                if (anomalyDetected) {
+                    add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                } else if (monotonicContinuityBroken) {
+                    add(
+                        systemTimeWarningEvent(
+                            remoteId,
+                            groupId,
+                            now,
+                            appVersion,
+                            wallClockAnomalyDetected = false,
+                            monotonicContinuityBroken = true
+                        )
+                    )
+                }
                 if (currentBatteryId != null) {
                     add(
                         DomainEvent(
@@ -59,7 +90,8 @@ class BatteryChangeUseCase(
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
                             wallClockAnomalyDetected = anomalyDetected,
-                            elapsedRealtimeMillis = elapsedRealtimeMillis
+                            elapsedRealtimeMillis = elapsedRealtimeMillis,
+                            monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
                 }
@@ -76,12 +108,10 @@ class BatteryChangeUseCase(
                         targetActionGroupId = null,
                         createdByAppVersion = appVersion,
                         wallClockAnomalyDetected = anomalyDetected,
-                        elapsedRealtimeMillis = elapsedRealtimeMillis
+                        elapsedRealtimeMillis = elapsedRealtimeMillis,
+                        monotonicContinuityBroken = monotonicContinuityBroken
                     )
                 )
-                if (anomalyDetected) {
-                    add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
-                }
             }
 
             repository.writeEventGroup(events)

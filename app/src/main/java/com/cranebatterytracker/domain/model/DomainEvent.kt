@@ -36,5 +36,16 @@ data class DomainEvent(
      * blindly (spec section 67). Null when no monotonic reading is available.
      */
     val elapsedRealtimeMillis: Long? = null,
+    /**
+     * True when this event was recorded right after the device's monotonic clock
+     * (elapsedRealtimeMillis) went backwards relative to the previously recorded event -
+     * almost always an ordinary reboot, not clock tampering (spec review Issue 12). A
+     * reboot is deliberately never reported as a [wallClockAnomalyDetected] anomaly - that
+     * would falsely imply the operator or someone tampered with the wall clock - but it
+     * still breaks the continuous monotonic timeline [RuntimeAnalysisEngine] otherwise
+     * relies on to certify a cycle as EXACT. This flag lets an interval that spans a
+     * reboot be downgraded to uncertain without ever claiming the wall clock was wrong.
+     */
+    val monotonicContinuityBroken: Boolean = false,
     val notes: String? = null
 )

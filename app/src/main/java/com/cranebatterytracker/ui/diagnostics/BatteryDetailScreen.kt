@@ -35,9 +35,12 @@ import com.cranebatterytracker.ui.theme.WestAccent
 fun BatteryDetailScreen(viewModel: DiagnosticsViewModel, batteryId: Int, onBack: () -> Unit) {
     val snapshot by viewModel.snapshot.collectAsState()
     val health = snapshot?.healths?.firstOrNull { it.batteryId == batteryId }
+    // Ordered by startSequenceNumber, the app's authoritative recorded order (spec review
+    // Issue 11), not by startTimestamp - a clock correction can make a cycle that started
+    // later carry an earlier wall-clock timestamp than one that started before it.
     val cycles = snapshot?.cyclesByBattery?.get(batteryId).orEmpty()
         .filter { it.classification != RuntimeClassification.UNKNOWN }
-        .sortedByDescending { it.startTimestamp }
+        .sortedByDescending { it.startSequenceNumber }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -93,13 +96,30 @@ private fun LabeledValue(label: String, value: String) {
     }
 }
 
+/**
+ * Each [RuntimeClassification] means a genuinely different kind of evidence (spec review
+ * Issue 10) and must not be flattened into one generic "min - max" range: a confirmed
+ * minimum has no known upper bound at all, so showing it as a range communicates a
+ * bounded estimate the app never actually observed.
+ */
+fun cycleRuntimeLabel(cycle: DerivedCycle): String = when (cycle.classification) {
+    RuntimeClassification.EXACT, RuntimeClassification.SUSPICIOUS_HIGH ->
+        formatDurationHoursMinutes(cycle.minimumActiveRuntimeMillis)
+
+    RuntimeClassification.SHIFT_INTERRUPTED ->
+        "${formatDurationHoursMinutes(cycle.minimumActiveRuntimeMillis)} – " +
+            "${formatDurationHoursMinutes(cycle.maximumActiveRuntimeMillis)} active runtime"
+
+    RuntimeClassification.CONFIRMED_MINIMUM ->
+        "At least ${formatDurationHoursMinutes(cycle.minimumActiveRuntimeMillis)}"
+
+    RuntimeClassification.UNKNOWN -> "Runtime unknown"
+}
+
 @Composable
 private fun CycleRow(cycle: DerivedCycle) {
     val remoteColor = if (cycle.remoteId == RemoteId.WEST) WestAccent else EastAccent
-    val runtimeLabel = when (cycle.classification) {
-        RuntimeClassification.EXACT -> formatDurationHoursMinutes(cycle.minimumActiveRuntimeMillis)
-        else -> "${formatDurationHoursMinutes(cycle.minimumActiveRuntimeMillis)} – ${formatDurationHoursMinutes(cycle.maximumActiveRuntimeMillis)}"
-    }
+    val runtimeLabel = cycleRuntimeLabel(cycle)
     Column(modifier = Modifier.padding(vertical = 6.dp)) {
         Text(
             text = "${cycle.remoteId.name} · ${cycle.displayClassification.name.replace('_', ' ')}",
@@ -112,7 +132,7 @@ private fun CycleRow(cycle: DerivedCycle) {
 
 @Composable
 private fun RuntimeGraph(cycles: List<DerivedCycle>, modifier: Modifier = Modifier) {
-    val chronological = cycles.sortedBy { it.startTimestamp }
+    val chronological = cycles.sortedBy { it.startSequenceNumber }
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
     val pointColor = MaterialTheme.colorScheme.primary
     val outlierColor = StatusBad

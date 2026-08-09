@@ -6,11 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.cranebatterytracker.di.AppContainer
 import com.cranebatterytracker.domain.analysis.EventFiltering
 import com.cranebatterytracker.domain.analysis.EventReducer
+import com.cranebatterytracker.domain.analysis.ShiftEngine
 import com.cranebatterytracker.domain.model.Battery
 import com.cranebatterytracker.domain.model.DomainEvent
 import com.cranebatterytracker.domain.model.EventType
 import com.cranebatterytracker.domain.model.Remote
 import com.cranebatterytracker.domain.model.RemoteId
+import com.cranebatterytracker.domain.model.RemoteKnowledge
 import com.cranebatterytracker.domain.model.RemoteState
 import com.cranebatterytracker.domain.model.batteryIdOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,32 +69,37 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    val uiState = combine(
+    /**
+     * Everything derivable from persisted data alone (spec review Issue 15): reducing the
+     * full event log, filtering out undone groups, and finding the latest action group are
+     * all O(event count) and only need to happen when events/batteries/remotes/settings
+     * actually change - not once a second forever. A permanent event log can eventually
+     * hold tens of thousands of rows, and none of that work depends on wall-clock time.
+     */
+    private data class EventDerivedState(
+        val knowledge: Map<RemoteId, RemoteKnowledge>,
+        val batteriesById: Map<Int, Battery>,
+        val remotesById: Map<RemoteId, Remote>,
+        val shiftEngine: ShiftEngine,
+        val recentGroupId: String?,
+        val recentTimestamp: Long?,
+        val recentSummary: String?
+    )
+
+    private val eventDerivedState = combine(
         container.repository.observeEvents(),
         container.repository.observeBatteries(),
         container.repository.observeRemotes(),
-        container.settingsRepository.settings,
-        ticker
-    ) { events, batteries, remotes, settings, now ->
+        container.settingsRepository.settings
+    ) { events, batteries, remotes, settings ->
         val shiftEngine = container.shiftEngine(settings)
         val knowledge = EventReducer.reduce(events)
-        val batteriesById = batteries.associateBy(Battery::batteryId)
-        val remotesById = remotes.associateBy(Remote::remoteId)
-
-        fun cardFor(remoteId: RemoteId): RemoteCardUiState? {
-            val seededRemote = remotesById[remoteId] ?: return null
+        val remotesById = remotes.associateBy(Remote::remoteId) { remote ->
             // The admin-configurable name in Settings, not the immutable seeded
             // RemoteEntity row, is the source of truth for what's displayed - otherwise
             // Settings -> Admin PIN -> remote names has no visible effect anywhere.
-            val configuredName = if (remoteId == RemoteId.WEST) settings.westDisplayName else settings.eastDisplayName
-            val remote = if (configuredName.isNotBlank()) seededRemote.copy(displayName = configuredName) else seededRemote
-            val state = shiftEngine.toDisplayState(knowledge.getValue(remoteId), now)
-            return RemoteCardUiState(
-                remoteId = remoteId,
-                remote = remote,
-                state = state,
-                batteryDisplayNumber = state.batteryIdOrNull?.let { batteriesById[it]?.displayNumber }
-            )
+            val configuredName = if (remote.remoteId == RemoteId.WEST) settings.westDisplayName else settings.eastDisplayName
+            if (configuredName.isNotBlank()) remote.copy(displayName = configuredName) else remote
         }
 
         val effective = EventFiltering.effectiveChronologicalEvents(events)
@@ -106,20 +113,38 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             .values
             .maxByOrNull { group -> group.maxOf { it.sequenceNumber } }
 
-        val recentGroupId = latestGroupEvents?.firstOrNull()?.actionGroupId
-        val recentTimestamp = latestGroupEvents?.maxOfOrNull { it.timestampEpochMillis }
-        val isRecent = recentTimestamp != null && (now - recentTimestamp) in 0..RECENT_ACTION_WINDOW_MILLIS
-        val recentMessage = if (isRecent && recentGroupId != dismissedActionGroupId.value) {
-            latestGroupEvents?.let { buildActionSummary(it, batteries, remotesById) }
-        } else {
-            null
+        EventDerivedState(
+            knowledge = knowledge,
+            batteriesById = batteries.associateBy(Battery::batteryId),
+            remotesById = remotesById,
+            shiftEngine = shiftEngine,
+            recentGroupId = latestGroupEvents?.firstOrNull()?.actionGroupId,
+            recentTimestamp = latestGroupEvents?.maxOfOrNull { it.timestampEpochMillis },
+            recentSummary = latestGroupEvents?.let { buildActionSummary(it, batteries, remotesById) }
+        )
+    }
+
+    /** Cheap, purely time/UI-dependent presentation built from the cached [EventDerivedState] on every tick. */
+    val uiState = combine(eventDerivedState, ticker) { data, now ->
+        fun cardFor(remoteId: RemoteId): RemoteCardUiState? {
+            val remote = data.remotesById[remoteId] ?: return null
+            val state = data.shiftEngine.toDisplayState(data.knowledge.getValue(remoteId), now)
+            return RemoteCardUiState(
+                remoteId = remoteId,
+                remote = remote,
+                state = state,
+                batteryDisplayNumber = state.batteryIdOrNull?.let { data.batteriesById[it]?.displayNumber }
+            )
         }
+
+        val isRecent = data.recentTimestamp != null && (now - data.recentTimestamp) in 0..RECENT_ACTION_WINDOW_MILLIS
+        val recentMessage = if (isRecent && data.recentGroupId != dismissedActionGroupId.value) data.recentSummary else null
 
         val westCard = cardFor(RemoteId.WEST)
         val eastCard = cardFor(RemoteId.EAST)
 
         val bannerDismissedRecently = dismissedShiftBannerAt.value?.let { (now - it) < 20 * 60_000L } ?: false
-        val shiftBanner = if (shiftEngine.isNearShiftStart(now) && !bannerDismissedRecently) {
+        val shiftBanner = if (data.shiftEngine.isNearShiftStart(now) && !bannerDismissedRecently) {
             ShiftBannerUiState(
                 westBatteryDisplayNumber = westCard?.batteryDisplayNumber,
                 eastBatteryDisplayNumber = eastCard?.batteryDisplayNumber
@@ -134,7 +159,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             east = eastCard,
             shiftBanner = shiftBanner,
             recentActionMessage = recentMessage,
-            recentActionGroupId = if (recentMessage != null) recentGroupId else null,
+            recentActionGroupId = if (recentMessage != null) data.recentGroupId else null,
             busy = busy.value,
             errorMessage = transientError.value
         )
@@ -180,11 +205,16 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             busy.value = true
             // Both confirmations are written as one action group so the permanent
-            // Undo control reverses this single button press atomically.
+            // Undo control reverses this single button press atomically. The banner is
+            // only ever dismissed once that write actually succeeds - if the repository
+            // transaction fails, the strongest prompt telling the next operator that
+            // state was never confirmed must stay visible, not disappear along with the
+            // error.
             runCatching {
                 container.confirmStateUseCase(RemoteId.WEST, RemoteId.EAST, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
-            }.onFailure { transientError.value = it.message }
-            dismissedShiftBannerAt.value = System.currentTimeMillis()
+            }
+                .onSuccess { dismissedShiftBannerAt.value = System.currentTimeMillis() }
+                .onFailure { transientError.value = it.message }
             busy.value = false
         }
     }

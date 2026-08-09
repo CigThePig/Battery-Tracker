@@ -3,6 +3,7 @@ package com.cranebatterytracker.backup
 import com.cranebatterytracker.domain.analysis.EventFiltering
 import com.cranebatterytracker.domain.model.DerivedCycle
 import com.cranebatterytracker.domain.model.DomainEvent
+import com.cranebatterytracker.domain.model.EventType
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.time.Instant
@@ -26,19 +27,37 @@ object CsvExporter {
         return if (needsQuoting) "\"" + value.replace("\"", "\"\"") + "\"" else value
     }
 
+    /**
+     * Exports events in [DomainEvent.sequenceNumber] order - the same authoritative
+     * replay order [EventFiltering] and [EventReducer] use - rather than by wall-clock
+     * timestamp. A backward clock correction can make an event recorded later carry an
+     * earlier [DomainEvent.timestampEpochMillis]; sorting by timestamp would let a
+     * downstream tool reconstruct a different state than the app itself computes.
+     */
     fun exportRawEvents(events: List<DomainEvent>, out: OutputStream, zoneId: ZoneId = ZoneId.systemDefault()) {
         val undoneGroups = EventFiltering.undoneActionGroupIds(events)
         OutputStreamWriter(out).use { writer ->
             writer.appendLine(
                 listOf(
-                    "event_id", "action_group_id", "timestamp", "remote", "battery",
-                    "event_type", "previous_battery", "new_battery", "undone"
+                    "sequence_number", "event_id", "action_group_id", "timestamp", "remote", "battery",
+                    "event_type", "previous_battery", "new_battery", "target_action_group_id", "undone",
+                    "wall_clock_anomaly_detected", "monotonic_continuity_broken", "elapsed_realtime_millis",
+                    "created_by_app_version", "notes"
                 ).joinToString(",")
             )
-            events.sortedBy { it.timestampEpochMillis }.forEach { event ->
-                val undone = event.actionGroupId != null && event.actionGroupId in undoneGroups
+            events.sortedBy { it.sequenceNumber }.forEach { event ->
+                // Mirrors EventFiltering.effectiveChronologicalEvents exactly: a
+                // SYSTEM_TIME_WARNING is never treated as undone, even a legacy row
+                // persisted by an older build whose actionGroupId still equals the
+                // triggering action's now-undone group. Computing this any other way would
+                // let a downstream reconstruction that trusts this column discard the only
+                // evidence a clock/continuity anomaly happened.
+                val undone = event.eventType != EventType.SYSTEM_TIME_WARNING &&
+                    event.actionGroupId != null &&
+                    event.actionGroupId in undoneGroups
                 writer.appendLine(
                     listOf(
+                        event.sequenceNumber.toString(),
                         event.eventId,
                         event.actionGroupId.orEmpty(),
                         formatTimestamp(event.timestampEpochMillis, zoneId),
@@ -47,7 +66,17 @@ object CsvExporter {
                         event.eventType.name,
                         event.previousBatteryId?.toString().orEmpty(),
                         event.newBatteryId?.toString().orEmpty(),
-                        undone.toString()
+                        event.targetActionGroupId.orEmpty(),
+                        undone.toString(),
+                        event.wallClockAnomalyDetected.toString(),
+                        // Without this, a downstream reconstruction of a log containing a
+                        // reboot has no way to know RuntimeAnalysisEngine downgraded any
+                        // cycles touching it - this is the only persisted fact that records
+                        // that a monotonic-continuity gap happened at this event at all.
+                        event.monotonicContinuityBroken.toString(),
+                        event.elapsedRealtimeMillis?.toString().orEmpty(),
+                        event.createdByAppVersion,
+                        event.notes.orEmpty()
                     ).joinToString(",") { csvField(it) }
                 )
             }
@@ -63,7 +92,7 @@ object CsvExporter {
                     "high_outlier", "short_runtime", "included_in_primary_statistics"
                 ).joinToString(",")
             )
-            cycles.sortedBy { it.startTimestamp }.forEach { cycle ->
+            cycles.sortedBy { it.startSequenceNumber }.forEach { cycle ->
                 writer.appendLine(
                     listOf(
                         cycle.cycleId,

@@ -32,10 +32,13 @@ fun EventHistoryScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
     val remotesById = snapshot?.remotes.orEmpty().associateBy { it.remoteId }
     val undoneGroups = EventFiltering.undoneActionGroupIds(events)
 
-    val grouped = events
-        .filter { it.eventType != EventType.UNDO_ACTION }
-        .sortedByDescending { it.timestampEpochMillis }
-        .groupBy { formatDayHeader(it.timestampEpochMillis) }
+    // Ordered by sequenceNumber - the app's authoritative recorded order (spec review
+    // Issue 11) - not by timestampEpochMillis. A clock correction can make an event
+    // recorded later carry an earlier wall-clock timestamp; sorting by timestamp would
+    // visually place it before events that actually happened first, even though the
+    // domain layer replays it correctly. The wall-clock timestamp is still shown per row.
+    val sortedEvents = events.filter { it.eventType != EventType.UNDO_ACTION }.sortedByDescending { it.sequenceNumber }
+    val sections = sectionEventsByDayHeader(sortedEvents)
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -43,7 +46,7 @@ fun EventHistoryScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
             Text(text = "EVENT HISTORY", style = MaterialTheme.typography.headlineMedium)
 
             LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
-                grouped.forEach { (day, dayEvents) ->
+                sections.forEach { (day, dayEvents) ->
                     item {
                         Text(
                             text = day,
@@ -63,6 +66,29 @@ fun EventHistoryScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
     }
 }
 
+/**
+ * Splits [sortedEvents] (already ordered by [DomainEvent.sequenceNumber]) into contiguous
+ * day-header runs, rather than grouping by day label directly: a plain `groupBy` merges
+ * every occurrence of the same label together wherever it appears, so a sequence like day
+ * 2, day 1, day 2 (a backward date correction, then more events) would collect both day-2
+ * runs under one heading ahead of day 1 - silently reordering events the sequence-based
+ * sort was specifically meant to keep correct.
+ */
+internal fun sectionEventsByDayHeader(sortedEvents: List<DomainEvent>): List<Pair<String, List<DomainEvent>>> = buildList {
+    var currentLabel: String? = null
+    var currentEvents = mutableListOf<DomainEvent>()
+    for (event in sortedEvents) {
+        val label = formatDayHeader(event.timestampEpochMillis)
+        if (label != currentLabel) {
+            if (currentLabel != null) add(currentLabel to currentEvents)
+            currentLabel = label
+            currentEvents = mutableListOf()
+        }
+        currentEvents.add(event)
+    }
+    if (currentLabel != null) add(currentLabel to currentEvents)
+}
+
 @Composable
 private fun EventRow(event: DomainEvent, remotesById: Map<com.cranebatterytracker.domain.model.RemoteId, Remote>, undone: Boolean) {
     val remoteLabel = event.remoteId?.let { remotesById[it]?.displayName?.uppercase() } ?: "BOTH REMOTES"
@@ -76,12 +102,19 @@ private fun EventRow(event: DomainEvent, remotesById: Map<com.cranebatterytracke
     }
 }
 
-private fun describeEvent(event: DomainEvent): String = when (event.eventType) {
+internal fun describeEvent(event: DomainEvent): String = when (event.eventType) {
     EventType.BATTERY_INSTALLED -> "Battery ${event.newBatteryId ?: event.batteryId} installed."
     EventType.BATTERY_REMOVED_DEAD -> "Battery ${event.batteryId} died."
     EventType.STATE_CONFIRMED -> "Battery ${event.batteryId} confirmed."
     EventType.STATE_CORRECTED -> "Corrected: Battery ${event.previousBatteryId ?: "?"} → Battery ${event.newBatteryId}."
     EventType.STATE_MARKED_UNKNOWN -> "Marked unknown."
     EventType.UNDO_ACTION -> "Undo."
-    EventType.SYSTEM_TIME_WARNING -> "Device clock anomaly detected."
+    // A reboot (monotonicContinuityBroken alone) must never be presented as a clock
+    // problem (spec review Issue 12) - only a genuine wallClockAnomalyDetected means the
+    // wall clock itself disagreed with the monotonic clock.
+    EventType.SYSTEM_TIME_WARNING -> if (event.wallClockAnomalyDetected) {
+        "Device clock anomaly detected."
+    } else {
+        "Device restarted around this point."
+    }
 }

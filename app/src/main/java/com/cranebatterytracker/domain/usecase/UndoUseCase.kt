@@ -16,6 +16,25 @@ class UndoUseCase(
     private val repository: BatteryTrackerRepository,
     private val appVersion: String
 ) {
+    companion object {
+        /**
+         * Event types that represent a real operator mutation and can therefore make an
+         * action group Undo-eligible. UNDO_ACTION never belongs to a group worth
+         * re-undoing, and SYSTEM_TIME_WARNING is timeline metadata, not an operator
+         * decision - it must never make a group independently undoable, and since it no
+         * longer shares an actionGroupId with the operator action that surfaced it
+         * (see systemTimeWarningEvent), it wouldn't appear here anyway. Listing it out
+         * explicitly still protects target selection if that ever changes.
+         */
+        private val OPERATOR_MUTATION_TYPES = setOf(
+            EventType.BATTERY_INSTALLED,
+            EventType.BATTERY_REMOVED_DEAD,
+            EventType.STATE_CONFIRMED,
+            EventType.STATE_CORRECTED,
+            EventType.STATE_MARKED_UNKNOWN
+        )
+    }
+
     /** Pass [targetActionGroupId] to undo a specific just-shown action; omit to undo the most recent one. */
     suspend operator fun invoke(
         targetActionGroupId: String? = null,
@@ -30,19 +49,21 @@ class UndoUseCase(
             // backward clock correction must not make an older action look newer again
             // (same reasoning as EventFiltering's replay order).
             val target = targetActionGroupId ?: allEvents
-                .filter { it.eventType != EventType.UNDO_ACTION && it.actionGroupId != null && it.actionGroupId !in undoneGroups }
+                .filter { it.eventType in OPERATOR_MUTATION_TYPES && it.actionGroupId != null && it.actionGroupId !in undoneGroups }
                 .maxByOrNull { it.sequenceNumber }
                 ?.actionGroupId
                 ?: throw BatteryTrackerException.NothingToUndo
 
             if (target in undoneGroups) throw BatteryTrackerException.ActionAlreadyUndone
 
-            // Undo can be the very first interaction after the device clock changes. If it
-            // unconditionally recorded no anomaly, the next normal action would compare
-            // against this event, see matching wall-clock/monotonic deltas, and the jump
-            // would go undetected entirely - so this needs the same check every other
-            // write path runs.
+            // Undo can be the very first interaction after the device clock changes, or
+            // after a reboot. If it unconditionally recorded neither, the next normal
+            // action would compare against this event, see matching wall-clock/monotonic
+            // deltas or an apparently-continuous uptime, and the discontinuity would go
+            // undetected entirely - so this needs the same checks every other write path
+            // runs.
             val anomalyDetected = ClockAnomalyDetector.detect(allEvents, now, elapsedRealtimeMillis)
+            val monotonicContinuityBroken = ClockAnomalyDetector.monotonicContinuityLost(allEvents, elapsedRealtimeMillis)
             val groupId = UUID.randomUUID().toString()
             val targetRemoteId = allEvents.firstOrNull { it.actionGroupId == target }?.remoteId
 
@@ -60,13 +81,31 @@ class UndoUseCase(
                         targetActionGroupId = target,
                         createdByAppVersion = appVersion,
                         wallClockAnomalyDetected = anomalyDetected,
-                        elapsedRealtimeMillis = elapsedRealtimeMillis
+                        elapsedRealtimeMillis = elapsedRealtimeMillis,
+                        monotonicContinuityBroken = monotonicContinuityBroken
                     )
                 )
                 // UNDO_ACTION events are filtered out of the replay stream entirely
                 // (EventFiltering), so this warning event is what actually carries the
-                // anomaly flag into RuntimeAnalysisEngine and poisons any open interval.
-                if (anomalyDetected) add(systemTimeWarningEvent(targetRemoteId, groupId, now, appVersion))
+                // anomaly/continuity flag into RuntimeAnalysisEngine and poisons any open
+                // interval. A wall-clock jump takes priority in the message if both are
+                // somehow true at once; otherwise a monotonic-only break still needs its
+                // own replay-visible marker, or a reboot Undo happens to be the first
+                // action after would go permanently unrecorded.
+                if (anomalyDetected) {
+                    add(systemTimeWarningEvent(targetRemoteId, groupId, now, appVersion))
+                } else if (monotonicContinuityBroken) {
+                    add(
+                        systemTimeWarningEvent(
+                            targetRemoteId,
+                            groupId,
+                            now,
+                            appVersion,
+                            wallClockAnomalyDetected = false,
+                            monotonicContinuityBroken = true
+                        )
+                    )
+                }
             }
 
             repository.writeEventGroup(events)

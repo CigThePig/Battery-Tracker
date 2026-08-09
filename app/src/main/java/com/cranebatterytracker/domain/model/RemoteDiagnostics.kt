@@ -44,7 +44,15 @@ enum class DataQualityLevel {
 data class DataQualitySummary(
     val exactCycles: Int,
     val shiftInterruptedCycles: Int,
+    /** Cycles with no end evidence at all - genuinely missing data, not incomplete-but-useful data. */
     val unknownGaps: Int,
+    /**
+     * Cycles with a confirmed lower bound ("still installed" at some later check) but no
+     * completed end - useful evidence, not an unknown gap (spec review Issue 13). Grouping
+     * these with [unknownGaps] made the data-quality screen paradoxically get more
+     * pessimistic the more reliably operators used shift confirmations.
+     */
+    val confirmedMinimumObservations: Int,
     val corrections: Int,
     val suspiciousHighCount: Int,
     val overallLevel: DataQualityLevel

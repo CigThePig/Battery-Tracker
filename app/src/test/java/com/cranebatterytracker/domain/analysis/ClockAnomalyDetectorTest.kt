@@ -69,4 +69,21 @@ class ClockAnomalyDetectorTest {
         // the actually-latest event agrees perfectly.
         assertFalse(anomaly)
     }
+
+    @Test
+    fun `monotonicContinuityLost is false when there is nothing to compare against`() {
+        assertFalse(ClockAnomalyDetector.monotonicContinuityLost(emptyList(), newElapsedRealtimeMillis = 1_000))
+    }
+
+    @Test
+    fun `monotonicContinuityLost is false for ordinary forward-moving elapsed time`() {
+        val prior = listOf(eventWithClock(wallClock = 1_000, elapsedRealtime = 500))
+        assertFalse(ClockAnomalyDetector.monotonicContinuityLost(prior, newElapsedRealtimeMillis = 600))
+    }
+
+    @Test
+    fun `monotonicContinuityLost is true when elapsed realtime moves backward - a reboot`() {
+        val prior = listOf(eventWithClock(wallClock = 1_000, elapsedRealtime = 500_000))
+        assertTrue(ClockAnomalyDetector.monotonicContinuityLost(prior, newElapsedRealtimeMillis = 1_000))
+    }
 }

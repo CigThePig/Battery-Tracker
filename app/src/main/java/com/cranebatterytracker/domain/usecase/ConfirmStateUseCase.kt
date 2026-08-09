@@ -31,9 +31,27 @@ class ConfirmStateUseCase(
             val priorEvents = repository.currentEventsSnapshot()
             val knowledge = EventReducer.reduce(priorEvents)
             val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
+            val monotonicContinuityBroken = ClockAnomalyDetector.monotonicContinuityLost(priorEvents, elapsedRealtimeMillis)
             val groupId = UUID.randomUUID().toString()
 
             val events = buildList {
+                // Written first - see BatteryChangeUseCase for why a monotonic-only break
+                // needs its own group-independent marker event ordered ahead of any event
+                // that might open a new interval, rather than just the flag stamped below.
+                if (anomalyDetected) {
+                    add(systemTimeWarningEvent(remoteIds.first(), groupId, now, appVersion))
+                } else if (monotonicContinuityBroken) {
+                    add(
+                        systemTimeWarningEvent(
+                            remoteIds.first(),
+                            groupId,
+                            now,
+                            appVersion,
+                            wallClockAnomalyDetected = false,
+                            monotonicContinuityBroken = true
+                        )
+                    )
+                }
                 for (remoteId in remoteIds) {
                     val known = knowledge[remoteId] as? RemoteKnowledge.Known
                         ?: throw BatteryTrackerException.NothingToConfirm
@@ -50,11 +68,11 @@ class ConfirmStateUseCase(
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
                             wallClockAnomalyDetected = anomalyDetected,
-                            elapsedRealtimeMillis = elapsedRealtimeMillis
+                            elapsedRealtimeMillis = elapsedRealtimeMillis,
+                            monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
                 }
-                if (anomalyDetected) add(systemTimeWarningEvent(remoteIds.first(), groupId, now, appVersion))
             }
 
             repository.writeEventGroup(events)

@@ -34,6 +34,7 @@ class CorrectStateUseCase(
             val knowledge = EventReducer.reduce(priorEvents)
             val previousBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
             val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
+            val monotonicContinuityBroken = ClockAnomalyDetector.monotonicContinuityLost(priorEvents, elapsedRealtimeMillis)
 
             if (previousBatteryId == newBatteryId) {
                 // The operator is confirming the battery the tablet already shows here,
@@ -43,6 +44,20 @@ class CorrectStateUseCase(
                 val groupId = UUID.randomUUID().toString()
                 repository.writeEventGroup(
                     buildList {
+                        if (anomalyDetected) {
+                            add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                        } else if (monotonicContinuityBroken) {
+                            add(
+                                systemTimeWarningEvent(
+                                    remoteId,
+                                    groupId,
+                                    now,
+                                    appVersion,
+                                    wallClockAnomalyDetected = false,
+                                    monotonicContinuityBroken = true
+                                )
+                            )
+                        }
                         add(
                             DomainEvent(
                                 eventId = UUID.randomUUID().toString(),
@@ -56,10 +71,10 @@ class CorrectStateUseCase(
                                 targetActionGroupId = null,
                                 createdByAppVersion = appVersion,
                                 wallClockAnomalyDetected = anomalyDetected,
-                                elapsedRealtimeMillis = elapsedRealtimeMillis
+                                elapsedRealtimeMillis = elapsedRealtimeMillis,
+                                monotonicContinuityBroken = monotonicContinuityBroken
                             )
                         )
-                        if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
                     }
                 )
                 return@inTransaction
@@ -75,22 +90,29 @@ class CorrectStateUseCase(
             val groupId = UUID.randomUUID().toString()
 
             val events = buildList {
-                add(
-                    DomainEvent(
-                        eventId = UUID.randomUUID().toString(),
-                        actionGroupId = groupId,
-                        timestampEpochMillis = now,
-                        remoteId = remoteId,
-                        batteryId = newBatteryId,
-                        eventType = EventType.STATE_CORRECTED,
-                        previousBatteryId = previousBatteryId,
-                        newBatteryId = newBatteryId,
-                        targetActionGroupId = null,
-                        createdByAppVersion = appVersion,
-                        wallClockAnomalyDetected = anomalyDetected,
-                        elapsedRealtimeMillis = elapsedRealtimeMillis
+                // Written first - see BatteryChangeUseCase for why a monotonic-only break
+                // needs its own group-independent marker ordered ahead of anything that
+                // might open a new interval.
+                if (anomalyDetected) {
+                    add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                } else if (monotonicContinuityBroken) {
+                    add(
+                        systemTimeWarningEvent(
+                            remoteId,
+                            groupId,
+                            now,
+                            appVersion,
+                            wallClockAnomalyDetected = false,
+                            monotonicContinuityBroken = true
+                        )
                     )
-                )
+                }
+                // Also written before STATE_CORRECTED, not after: this event only closes
+                // the other remote's interval, but it still carries the same continuity
+                // flag, and RuntimeAnalysisEngine poisons whatever is open at the moment it
+                // processes any flagged event - if this ran after STATE_CORRECTED, it would
+                // retroactively taint the interval STATE_CORRECTED just opened on this
+                // remote, even though that interval starts entirely after the reboot.
                 if (collision) {
                     add(
                         DomainEvent(
@@ -105,11 +127,28 @@ class CorrectStateUseCase(
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
                             wallClockAnomalyDetected = anomalyDetected,
-                            elapsedRealtimeMillis = elapsedRealtimeMillis
+                            elapsedRealtimeMillis = elapsedRealtimeMillis,
+                            monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
                 }
-                if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                add(
+                    DomainEvent(
+                        eventId = UUID.randomUUID().toString(),
+                        actionGroupId = groupId,
+                        timestampEpochMillis = now,
+                        remoteId = remoteId,
+                        batteryId = newBatteryId,
+                        eventType = EventType.STATE_CORRECTED,
+                        previousBatteryId = previousBatteryId,
+                        newBatteryId = newBatteryId,
+                        targetActionGroupId = null,
+                        createdByAppVersion = appVersion,
+                        wallClockAnomalyDetected = anomalyDetected,
+                        elapsedRealtimeMillis = elapsedRealtimeMillis,
+                        monotonicContinuityBroken = monotonicContinuityBroken
+                    )
+                )
             }
 
             repository.writeEventGroup(events)
