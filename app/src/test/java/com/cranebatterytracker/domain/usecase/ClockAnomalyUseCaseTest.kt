@@ -73,4 +73,22 @@ class ClockAnomalyUseCaseTest {
         // A reboot must never claim the wall clock was wrong - no alarming warning event.
         assertTrue(repository.allEvents().none { it.eventType == EventType.SYSTEM_TIME_WARNING })
     }
+
+    @Test
+    fun `Undo as the first interaction after a reboot still records the continuity break`() = runTest {
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+        val undoUseCase = UndoUseCase(repository, "test")
+
+        changeUseCase(RemoteId.WEST, 1, now = 1_000, elapsedRealtimeMillis = 500_000)
+        changeUseCase(RemoteId.EAST, 3, now = 1_000, elapsedRealtimeMillis = 500_000)
+        // The device reboots; Undo is the very first interaction afterward.
+        undoUseCase(now = 11_000, elapsedRealtimeMillis = 1_000)
+
+        val events = repository.allEvents()
+        assertTrue(events.any { it.eventType == EventType.UNDO_ACTION && it.monotonicContinuityBroken })
+        val marker = events.single { it.eventType == EventType.SYSTEM_TIME_WARNING }
+        assertTrue(marker.monotonicContinuityBroken)
+        assertFalse(marker.wallClockAnomalyDetected)
+    }
 }

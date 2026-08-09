@@ -18,12 +18,20 @@ import java.util.UUID
  * is still recorded, informationally, in [DomainEvent.targetActionGroupId] so the
  * warning can be traced back to what surfaced it - that field is otherwise only
  * interpreted for UNDO_ACTION events, so it has no effect on undo/replay logic here.
+ *
+ * [wallClockAnomalyDetected] and [monotonicContinuityBroken] default to the original
+ * "wall clock jumped" case, but a caller that only detected a lost monotonic timeline
+ * (an ordinary reboot, with no wall-clock jump) should pass `wallClockAnomalyDetected =
+ * false, monotonicContinuityBroken = true` instead - a reboot must never be reported as
+ * wall-clock tampering.
  */
 internal fun systemTimeWarningEvent(
     remoteId: RemoteId?,
     triggeringActionGroupId: String?,
     timestamp: Long,
-    appVersion: String
+    appVersion: String,
+    wallClockAnomalyDetected: Boolean = true,
+    monotonicContinuityBroken: Boolean = false
 ): DomainEvent = DomainEvent(
     eventId = UUID.randomUUID().toString(),
     actionGroupId = null,
@@ -35,6 +43,11 @@ internal fun systemTimeWarningEvent(
     newBatteryId = null,
     targetActionGroupId = triggeringActionGroupId,
     createdByAppVersion = appVersion,
-    wallClockAnomalyDetected = true,
-    notes = "Wall-clock time disagreed with the device's monotonic clock around this action."
+    wallClockAnomalyDetected = wallClockAnomalyDetected,
+    monotonicContinuityBroken = monotonicContinuityBroken,
+    notes = if (wallClockAnomalyDetected) {
+        "Wall-clock time disagreed with the device's monotonic clock around this action."
+    } else {
+        "The device's monotonic clock lost continuity (e.g. a reboot) around this action."
+    }
 )

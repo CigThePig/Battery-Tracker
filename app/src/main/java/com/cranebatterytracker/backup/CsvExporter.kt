@@ -40,7 +40,8 @@ object CsvExporter {
                 listOf(
                     "sequence_number", "event_id", "action_group_id", "timestamp", "remote", "battery",
                     "event_type", "previous_battery", "new_battery", "target_action_group_id", "undone",
-                    "wall_clock_anomaly_detected", "elapsed_realtime_millis", "created_by_app_version", "notes"
+                    "wall_clock_anomaly_detected", "monotonic_continuity_broken", "elapsed_realtime_millis",
+                    "created_by_app_version", "notes"
                 ).joinToString(",")
             )
             events.sortedBy { it.sequenceNumber }.forEach { event ->
@@ -59,6 +60,11 @@ object CsvExporter {
                         event.targetActionGroupId.orEmpty(),
                         undone.toString(),
                         event.wallClockAnomalyDetected.toString(),
+                        // Without this, a downstream reconstruction of a log containing a
+                        // reboot has no way to know RuntimeAnalysisEngine downgraded any
+                        // cycles touching it - this is the only persisted fact that records
+                        // that a monotonic-continuity gap happened at this event at all.
+                        event.monotonicContinuityBroken.toString(),
                         event.elapsedRealtimeMillis?.toString().orEmpty(),
                         event.createdByAppVersion,
                         event.notes.orEmpty()

@@ -37,10 +37,9 @@ fun EventHistoryScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
     // recorded later carry an earlier wall-clock timestamp; sorting by timestamp would
     // visually place it before events that actually happened first, even though the
     // domain layer replays it correctly. The wall-clock timestamp is still shown per row.
-    val grouped = events
-        .filter { it.eventType != EventType.UNDO_ACTION }
-        .sortedByDescending { it.sequenceNumber }
-        .groupBy { formatDayHeader(it.timestampEpochMillis) }
+    //
+    val sortedEvents = events.filter { it.eventType != EventType.UNDO_ACTION }.sortedByDescending { it.sequenceNumber }
+    val sections = sectionEventsByDayHeader(sortedEvents)
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -48,7 +47,7 @@ fun EventHistoryScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
             Text(text = "EVENT HISTORY", style = MaterialTheme.typography.headlineMedium)
 
             LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
-                grouped.forEach { (day, dayEvents) ->
+                sections.forEach { (day, dayEvents) ->
                     item {
                         Text(
                             text = day,
@@ -66,6 +65,29 @@ fun EventHistoryScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Splits [sortedEvents] (already ordered by [DomainEvent.sequenceNumber]) into contiguous
+ * day-header runs, rather than grouping by day label directly: a plain `groupBy` merges
+ * every occurrence of the same label together wherever it appears, so a sequence like day
+ * 2, day 1, day 2 (a backward date correction, then more events) would collect both day-2
+ * runs under one heading ahead of day 1 - silently reordering events the sequence-based
+ * sort was specifically meant to keep correct.
+ */
+internal fun sectionEventsByDayHeader(sortedEvents: List<DomainEvent>): List<Pair<String, List<DomainEvent>>> = buildList {
+    var currentLabel: String? = null
+    var currentEvents = mutableListOf<DomainEvent>()
+    for (event in sortedEvents) {
+        val label = formatDayHeader(event.timestampEpochMillis)
+        if (label != currentLabel) {
+            if (currentLabel != null) add(currentLabel to currentEvents)
+            currentLabel = label
+            currentEvents = mutableListOf()
+        }
+        currentEvents.add(event)
+    }
+    if (currentLabel != null) add(currentLabel to currentEvents)
 }
 
 @Composable

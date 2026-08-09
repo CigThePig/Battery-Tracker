@@ -73,6 +73,7 @@ class CsvExporterTest {
             targetActionGroupId = "group-e1",
             createdByAppVersion = "1.2.3",
             wallClockAnomalyDetected = true,
+            monotonicContinuityBroken = false,
             elapsedRealtimeMillis = 42_000,
             notes = "clock jumped"
         )
@@ -88,5 +89,36 @@ class CsvExporterTest {
         assertEquals("42000", row[header.indexOf("elapsed_realtime_millis")])
         assertEquals("1.2.3", row[header.indexOf("created_by_app_version")])
         assertEquals("clock jumped", row[header.indexOf("notes")])
+    }
+
+    @Test
+    fun `raw export includes the monotonic continuity flag`() {
+        val rebootMarker = DomainEvent(
+            eventId = "r1",
+            sequenceNumber = 4,
+            actionGroupId = null,
+            timestampEpochMillis = 1_000,
+            remoteId = RemoteId.WEST,
+            batteryId = null,
+            eventType = EventType.SYSTEM_TIME_WARNING,
+            previousBatteryId = null,
+            newBatteryId = null,
+            targetActionGroupId = "group-e1",
+            createdByAppVersion = "test",
+            wallClockAnomalyDetected = false,
+            monotonicContinuityBroken = true,
+            elapsedRealtimeMillis = 100,
+            notes = "reboot"
+        )
+
+        val out = ByteArrayOutputStream()
+        CsvExporter.exportRawEvents(listOf(rebootMarker), out)
+        val lines = out.toString().trim().lines()
+        val header = lines.first().split(",")
+        val row = lines[1].split(",")
+
+        assertTrue(header.contains("monotonic_continuity_broken"))
+        assertEquals("true", row[header.indexOf("monotonic_continuity_broken")])
+        assertEquals("false", row[header.indexOf("wall_clock_anomaly_detected")])
     }
 }

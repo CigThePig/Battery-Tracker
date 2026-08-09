@@ -130,10 +130,17 @@ class BackupManager(
             // available day in that month becomes the permanent monthly snapshot.
             overflow.sortedBy { it.nameWithoutExtension }.forEach { file ->
                 val monthKey = backupDate(file)?.let { it.year to it.monthValue }
-                if (monthKey != null && archivedMonths.add(monthKey)) {
-                    file.copyTo(File(archiveDir, file.name), overwrite = true)
+                val needsArchiving = monthKey != null && monthKey !in archivedMonths
+                // publishArchiveCopy is atomic (temp file + rename), so a failed/interrupted
+                // copy never leaves a truncated .db sitting in the archive directory. If it
+                // does fail, this month is deliberately left un-archived and this daily
+                // source is kept (not deleted) so the next prune retries instead of
+                // permanently losing the only remaining copy for that month.
+                val archived = !needsArchiving || publishArchiveCopy(file, file.name)
+                if (archived) {
+                    if (needsArchiving) archivedMonths += monthKey!!
+                    file.delete()
                 }
-                file.delete()
             }
         }
 
@@ -147,6 +154,25 @@ class BackupManager(
 
     private fun backupDate(file: File): LocalDate? =
         runCatching { LocalDate.parse(file.nameWithoutExtension, dateFormatter) }.getOrNull()
+
+    /**
+     * Copies [source] into the archive under [targetName] through a temp file, publishing
+     * it only via an atomic rename once the copy has fully succeeded. Without this, a
+     * `copyTo` that fails partway (e.g. disk full) can leave a truncated `.db` at the
+     * final archive path; on the next prune that truncated file would already look like a
+     * valid archived snapshot for its month, so the copy is never retried and the source
+     * daily backup that could have provided a good copy gets deleted anyway - permanently
+     * losing that month's archive.
+     */
+    private fun publishArchiveCopy(source: File, targetName: String): Boolean {
+        val target = File(archiveDir, targetName)
+        val temp = File(archiveDir, "$targetName.tmp")
+        return runCatching {
+            source.copyTo(temp, overwrite = true)
+            if (!temp.renameTo(target)) error("Could not publish archive copy for $targetName")
+            true
+        }.onFailure { temp.delete() }.getOrDefault(false)
+    }
 
     fun listDailyBackups(): List<File> = dailyDir.listFiles { file -> file.extension == "db" }
         ?.sortedByDescending { it.nameWithoutExtension } ?: emptyList()
