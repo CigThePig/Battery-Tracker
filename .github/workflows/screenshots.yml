@@ -2,6 +2,9 @@ name: Capture Screenshots
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - claude/screenshot-capture
 
 jobs:
   screenshots:
