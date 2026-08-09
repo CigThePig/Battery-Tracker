@@ -4,6 +4,7 @@ import com.cranebatterytracker.domain.model.EventType
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.testutil.FakeBatteryTrackerRepository
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -53,5 +54,23 @@ class ClockAnomalyUseCaseTest {
         val events = repository.allEvents()
         assertTrue(events.any { it.eventType == EventType.UNDO_ACTION && it.wallClockAnomalyDetected })
         assertTrue(events.any { it.eventType == EventType.SYSTEM_TIME_WARNING })
+    }
+
+    @Test
+    fun `an ordinary reboot is stamped as a monotonic continuity break, not a wall-clock anomaly`() = runTest {
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+
+        // First event anchors the monotonic clock.
+        changeUseCase(RemoteId.WEST, 1, now = 1_000, elapsedRealtimeMillis = 500_000)
+        // The device reboots: elapsedRealtime resets to a small value, but the wall clock
+        // keeps going normally (no tampering).
+        changeUseCase(RemoteId.WEST, 2, now = 11_000, elapsedRealtimeMillis = 1_000)
+
+        val secondInstall = repository.allEvents().last { it.eventType == EventType.BATTERY_INSTALLED }
+        assertTrue(secondInstall.monotonicContinuityBroken)
+        assertFalse(secondInstall.wallClockAnomalyDetected)
+        // A reboot must never claim the wall clock was wrong - no alarming warning event.
+        assertTrue(repository.allEvents().none { it.eventType == EventType.SYSTEM_TIME_WARNING })
     }
 }

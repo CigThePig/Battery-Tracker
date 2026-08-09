@@ -26,19 +26,28 @@ object CsvExporter {
         return if (needsQuoting) "\"" + value.replace("\"", "\"\"") + "\"" else value
     }
 
+    /**
+     * Exports events in [DomainEvent.sequenceNumber] order - the same authoritative
+     * replay order [EventFiltering] and [EventReducer] use - rather than by wall-clock
+     * timestamp. A backward clock correction can make an event recorded later carry an
+     * earlier [DomainEvent.timestampEpochMillis]; sorting by timestamp would let a
+     * downstream tool reconstruct a different state than the app itself computes.
+     */
     fun exportRawEvents(events: List<DomainEvent>, out: OutputStream, zoneId: ZoneId = ZoneId.systemDefault()) {
         val undoneGroups = EventFiltering.undoneActionGroupIds(events)
         OutputStreamWriter(out).use { writer ->
             writer.appendLine(
                 listOf(
-                    "event_id", "action_group_id", "timestamp", "remote", "battery",
-                    "event_type", "previous_battery", "new_battery", "undone"
+                    "sequence_number", "event_id", "action_group_id", "timestamp", "remote", "battery",
+                    "event_type", "previous_battery", "new_battery", "target_action_group_id", "undone",
+                    "wall_clock_anomaly_detected", "elapsed_realtime_millis", "created_by_app_version", "notes"
                 ).joinToString(",")
             )
-            events.sortedBy { it.timestampEpochMillis }.forEach { event ->
+            events.sortedBy { it.sequenceNumber }.forEach { event ->
                 val undone = event.actionGroupId != null && event.actionGroupId in undoneGroups
                 writer.appendLine(
                     listOf(
+                        event.sequenceNumber.toString(),
                         event.eventId,
                         event.actionGroupId.orEmpty(),
                         formatTimestamp(event.timestampEpochMillis, zoneId),
@@ -47,7 +56,12 @@ object CsvExporter {
                         event.eventType.name,
                         event.previousBatteryId?.toString().orEmpty(),
                         event.newBatteryId?.toString().orEmpty(),
-                        undone.toString()
+                        event.targetActionGroupId.orEmpty(),
+                        undone.toString(),
+                        event.wallClockAnomalyDetected.toString(),
+                        event.elapsedRealtimeMillis?.toString().orEmpty(),
+                        event.createdByAppVersion,
+                        event.notes.orEmpty()
                     ).joinToString(",") { csvField(it) }
                 )
             }
@@ -63,7 +77,7 @@ object CsvExporter {
                     "high_outlier", "short_runtime", "included_in_primary_statistics"
                 ).joinToString(",")
             )
-            cycles.sortedBy { it.startTimestamp }.forEach { cycle ->
+            cycles.sortedBy { it.startSequenceNumber }.forEach { cycle ->
                 writer.appendLine(
                     listOf(
                         cycle.cycleId,

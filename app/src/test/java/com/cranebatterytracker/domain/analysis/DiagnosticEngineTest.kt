@@ -200,4 +200,66 @@ class DiagnosticEngineTest {
         assertEquals(BatteryTrend.STRONG_REPLACEMENT_CANDIDATE, health.trend)
         assertTrue(health.recentChangePercent != null && health.recentChangePercent!! <= -45.0)
     }
+
+    @Test
+    fun `a healthy battery used mostly in a faster-draining remote is not falsely condemned`() {
+        val batteries = (1..4).map(::battery)
+        // Batteries 1, 2 and 4 are used in both remotes and genuinely run 20 percent
+        // shorter in East than in West - an ordinary remote-specific effect, not a
+        // battery problem. Battery 3 happens to almost always be used in East, so its
+        // lifetime median (mixing in the fast-draining remote) would look weak against a
+        // flat, unstratified fleet median even though it matches its East peers exactly.
+        val cyclesByBattery = mutableMapOf<Int, List<DerivedCycle>>()
+        for (id in listOf(1, 2, 4)) {
+            cyclesByBattery[id] = (0 until 5).map { i -> exactCycle(id, RemoteId.WEST, 5 * 3_600_000L, i * 1_000_000L) } +
+                (0 until 5).map { i -> exactCycle(id, RemoteId.EAST, 4 * 3_600_000L, i * 1_000_000L + 500_000L) }
+        }
+        cyclesByBattery[3] = (0 until 5).map { i -> exactCycle(3, RemoteId.EAST, 4 * 3_600_000L, i * 1_000_000L) }
+
+        val healths = engine.batteryHealths(batteries, cyclesByBattery, emptyMap())
+        val eastHeavyBattery = healths.single { it.batteryId == 3 }
+
+        assertTrue(
+            "Expected battery 3 not to be flagged as a replacement candidate, was ${eastHeavyBattery.trend}",
+            eastHeavyBattery.trend != BatteryTrend.STRONG_REPLACEMENT_CANDIDATE
+        )
+    }
+
+    @Test
+    fun `a battery weak in both remotes is still detected despite per-remote normalization`() {
+        val batteries = (1..4).map(::battery)
+        val cyclesByBattery = mutableMapOf<Int, List<DerivedCycle>>()
+        for (id in listOf(1, 2, 4)) {
+            cyclesByBattery[id] = (0 until 5).map { i -> exactCycle(id, RemoteId.WEST, 5 * 3_600_000L, i * 1_000_000L) } +
+                (0 until 5).map { i -> exactCycle(id, RemoteId.EAST, 4 * 3_600_000L, i * 1_000_000L + 500_000L) }
+        }
+        // Battery 3 is used evenly across both remotes but runs 30 percent shorter than
+        // its peers in each one - a genuine battery-specific weakness that must survive
+        // stratifying the comparison by remote, not disappear into remote-specific noise.
+        cyclesByBattery[3] = (0 until 5).map { i -> exactCycle(3, RemoteId.WEST, 3 * 3_600_000L + 30 * 60_000L, i * 1_000_000L) } +
+            (0 until 5).map { i -> exactCycle(3, RemoteId.EAST, 2 * 3_600_000L + 48 * 60_000L, i * 1_000_000L + 500_000L) }
+
+        val healths = engine.batteryHealths(batteries, cyclesByBattery, emptyMap())
+        val weakBattery = healths.single { it.batteryId == 3 }
+
+        assertEquals(BatteryTrend.STRONG_REPLACEMENT_CANDIDATE, weakBattery.trend)
+    }
+
+    @Test
+    fun `confirmed-minimum observations are reported separately from unknown gaps`() {
+        val exact = List(20) { exactCycle(1, RemoteId.WEST, 5 * 3_600_000L, it * 100_000L) }
+        val confirmedMinimum = List(5) {
+            exactCycle(1, RemoteId.WEST, 4 * 3_600_000L, (20 + it) * 100_000L)
+                .copy(classification = RuntimeClassification.CONFIRMED_MINIMUM, includedInPrimaryStatistics = false)
+        }
+        val unknown = List(2) {
+            exactCycle(1, RemoteId.WEST, 0, (30 + it) * 100_000L)
+                .copy(classification = RuntimeClassification.UNKNOWN, includedInPrimaryStatistics = false)
+        }
+
+        val summary = engine.dataQuality(exact + confirmedMinimum + unknown, correctionCount = 0)
+
+        assertEquals(5, summary.confirmedMinimumObservations)
+        assertEquals(2, summary.unknownGaps)
+    }
 }

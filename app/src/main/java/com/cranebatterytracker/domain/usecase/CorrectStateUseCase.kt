@@ -34,6 +34,7 @@ class CorrectStateUseCase(
             val knowledge = EventReducer.reduce(priorEvents)
             val previousBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
             val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
+            val monotonicContinuityBroken = ClockAnomalyDetector.monotonicContinuityLost(priorEvents, elapsedRealtimeMillis)
 
             if (previousBatteryId == newBatteryId) {
                 // The operator is confirming the battery the tablet already shows here,
@@ -56,7 +57,8 @@ class CorrectStateUseCase(
                                 targetActionGroupId = null,
                                 createdByAppVersion = appVersion,
                                 wallClockAnomalyDetected = anomalyDetected,
-                                elapsedRealtimeMillis = elapsedRealtimeMillis
+                                elapsedRealtimeMillis = elapsedRealtimeMillis,
+                                monotonicContinuityBroken = monotonicContinuityBroken
                             )
                         )
                         if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
@@ -88,7 +90,8 @@ class CorrectStateUseCase(
                         targetActionGroupId = null,
                         createdByAppVersion = appVersion,
                         wallClockAnomalyDetected = anomalyDetected,
-                        elapsedRealtimeMillis = elapsedRealtimeMillis
+                        elapsedRealtimeMillis = elapsedRealtimeMillis,
+                        monotonicContinuityBroken = monotonicContinuityBroken
                     )
                 )
                 if (collision) {
@@ -105,7 +108,8 @@ class CorrectStateUseCase(
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
                             wallClockAnomalyDetected = anomalyDetected,
-                            elapsedRealtimeMillis = elapsedRealtimeMillis
+                            elapsedRealtimeMillis = elapsedRealtimeMillis,
+                            monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
                 }

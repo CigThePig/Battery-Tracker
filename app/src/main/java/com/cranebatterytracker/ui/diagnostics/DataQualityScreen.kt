@@ -34,6 +34,7 @@ fun DataQualityScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
                 )
                 QualityRow("Exact cycles", it.exactCycles.toString())
                 QualityRow("Shift-interrupted cycles", it.shiftInterruptedCycles.toString())
+                QualityRow("Confirmed minimum observations", it.confirmedMinimumObservations.toString())
                 QualityRow("Unknown gaps", it.unknownGaps.toString())
                 QualityRow("Corrections", it.corrections.toString())
                 QualityRow("Suspicious-high records", it.suspiciousHighCount.toString())

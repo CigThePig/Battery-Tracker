@@ -38,13 +38,14 @@ class RuntimeAnalysisEngine(
         val cycles = mutableListOf<DerivedCycle>()
 
         for (event in effective) {
-            // A clock jump is device-wide - it corrupts the wall-clock duration of every
-            // interval open at that instant, not just the one tied to whichever remote's
-            // event happened to detect it (e.g. a jump surfaced while changing West must
-            // still poison an interval that's open on East). This must run before the
-            // remoteId null-check below so it also sees anomaly warnings that aren't
-            // themselves tied to a single remote, such as the one Undo can emit.
-            if (event.wallClockAnomalyDetected) {
+            // A clock jump - or a lost monotonic timeline across a reboot - is device-wide:
+            // it corrupts the wall-clock duration of every interval open at that instant,
+            // not just the one tied to whichever remote's event happened to detect it
+            // (e.g. a jump surfaced while changing West must still poison an interval
+            // that's open on East). This must run before the remoteId null-check below so
+            // it also sees anomaly warnings that aren't themselves tied to a single
+            // remote, such as the one Undo can emit.
+            if (event.wallClockAnomalyDetected || event.monotonicContinuityBroken) {
                 open.values.forEach { it.hasClockAnomaly = true }
             }
 
@@ -59,7 +60,7 @@ class RuntimeAnalysisEngine(
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
                             startSequenceNumber = event.sequenceNumber,
-                            hasClockAnomaly = event.wallClockAnomalyDetected,
+                            hasClockAnomaly = event.wallClockAnomalyDetected || event.monotonicContinuityBroken,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
                         )
@@ -83,7 +84,7 @@ class RuntimeAnalysisEngine(
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
                             startSequenceNumber = event.sequenceNumber,
-                            hasClockAnomaly = event.wallClockAnomalyDetected,
+                            hasClockAnomaly = event.wallClockAnomalyDetected || event.monotonicContinuityBroken,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
                         )
@@ -124,10 +125,11 @@ class RuntimeAnalysisEngine(
         val rawDuration = endEvent.timestampEpochMillis - interval.startTimestamp
         val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, endEvent.timestampEpochMillis)
         // Section 31: a reliable install and a reliable removal are necessary but not
-        // sufficient for EXACT - a wall-clock jump anywhere in the interval (its start,
-        // its end, or an intermediate confirmation) means the elapsed time itself can't
-        // be trusted, so such a cycle can be at best SHIFT_INTERRUPTED.
-        val clockAnomaly = interval.hasClockAnomaly || endEvent.wallClockAnomalyDetected
+        // sufficient for EXACT - a wall-clock jump, or a lost monotonic timeline across a
+        // reboot, anywhere in the interval (its start, its end, or an intermediate
+        // confirmation) means the elapsed time itself can't be trusted, so such a cycle
+        // can be at best SHIFT_INTERRUPTED.
+        val clockAnomaly = interval.hasClockAnomaly || endEvent.wallClockAnomalyDetected || endEvent.monotonicContinuityBroken
         val classification = if (minimum == rawDuration && !clockAnomaly) {
             RuntimeClassification.EXACT
         } else {

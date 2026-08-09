@@ -32,9 +32,14 @@ fun EventHistoryScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
     val remotesById = snapshot?.remotes.orEmpty().associateBy { it.remoteId }
     val undoneGroups = EventFiltering.undoneActionGroupIds(events)
 
+    // Ordered by sequenceNumber - the app's authoritative recorded order (spec review
+    // Issue 11) - not by timestampEpochMillis. A clock correction can make an event
+    // recorded later carry an earlier wall-clock timestamp; sorting by timestamp would
+    // visually place it before events that actually happened first, even though the
+    // domain layer replays it correctly. The wall-clock timestamp is still shown per row.
     val grouped = events
         .filter { it.eventType != EventType.UNDO_ACTION }
-        .sortedByDescending { it.timestampEpochMillis }
+        .sortedByDescending { it.sequenceNumber }
         .groupBy { formatDayHeader(it.timestampEpochMillis) }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

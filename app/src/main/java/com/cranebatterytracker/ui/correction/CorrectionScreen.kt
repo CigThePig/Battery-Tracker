@@ -2,14 +2,12 @@ package com.cranebatterytracker.ui.correction
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -79,24 +77,40 @@ fun CorrectionScreen(
                 ErrorBanner(message = message, onDismiss = viewModel::consumeError, modifier = Modifier.padding(top = 8.dp))
             }
 
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+            // Non-lazy 2-wide grid, not LazyVerticalGrid (spec review Issue 9): lazy grid
+            // children aren't measured like ordinary bounded cells along the scrolling
+            // axis, so these buttons could collapse toward their minimum size inside a
+            // mostly-empty grid instead of filling the space glove-friendly targets need.
+            // There will never be more than a handful of batteries.
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(vertical = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(4.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(state.batteries) { battery ->
-                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
-                        Button(
-                            onClick = { viewModel.selectBattery(battery.batteryId) },
-                            enabled = !state.submitting,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            Text(text = battery.displayNumber.toString(), style = MaterialTheme.typography.headlineLarge)
+                state.batteries.chunked(2).forEach { rowBatteries ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        rowBatteries.forEach { battery ->
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                            ) {
+                                Button(
+                                    onClick = { viewModel.selectBattery(battery.batteryId) },
+                                    enabled = !state.submitting,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Text(text = battery.displayNumber.toString(), style = MaterialTheme.typography.headlineLarge)
+                                }
+                            }
+                        }
+                        if (rowBatteries.size < 2) {
+                            Column(modifier = Modifier.weight(1f)) {}
                         }
                     }
                 }

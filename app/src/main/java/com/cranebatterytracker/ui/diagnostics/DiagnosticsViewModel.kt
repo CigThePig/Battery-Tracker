@@ -2,6 +2,7 @@ package com.cranebatterytracker.ui.diagnostics
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.cranebatterytracker.backup.BackupStatus
 import com.cranebatterytracker.di.AppContainer
 import com.cranebatterytracker.domain.analysis.EventFiltering
 import com.cranebatterytracker.domain.analysis.RuntimeAnalysisEngine
@@ -14,6 +15,7 @@ import com.cranebatterytracker.domain.model.Remote
 import com.cranebatterytracker.domain.model.RemoteDiagnosticSummary
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 
 data class DiagnosticsSnapshot(
@@ -58,4 +60,8 @@ class DiagnosticsViewModel(private val container: AppContainer) : ViewModel() {
             rawEvents = events
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Refreshed each time this screen is opened; automatic backups run at most hourly, so live polling isn't needed. */
+    val backupStatus = flow { emit(container.backupManager.readStatus()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BackupStatus.UNKNOWN)
 }

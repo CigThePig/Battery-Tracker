@@ -20,6 +20,7 @@ class MarkUnknownUseCase(
         repository.inTransaction {
             val priorEvents = repository.currentEventsSnapshot()
             val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
+            val monotonicContinuityBroken = ClockAnomalyDetector.monotonicContinuityLost(priorEvents, elapsedRealtimeMillis)
             val groupId = UUID.randomUUID().toString()
 
             repository.writeEventGroup(
@@ -37,7 +38,8 @@ class MarkUnknownUseCase(
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
                             wallClockAnomalyDetected = anomalyDetected,
-                            elapsedRealtimeMillis = elapsedRealtimeMillis
+                            elapsedRealtimeMillis = elapsedRealtimeMillis,
+                            monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
                     if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))

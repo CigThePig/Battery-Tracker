@@ -276,4 +276,68 @@ class RuntimeAnalysisEngineTest {
         assertEquals(RuntimeClassification.UNKNOWN, openCycle.classification)
         assertFalse(openCycle.includedInPrimaryStatistics)
     }
+
+    @Test
+    fun `a reboot mid-interval downgrades an otherwise-clean cycle from exact to shift-interrupted`() {
+        // The tablet rebooted between install and removal - the wall clock never jumped
+        // (no tampering, no SYSTEM_TIME_WARNING needed), but the monotonic elapsed-time
+        // timeline was broken, so the cycle can no longer be certified as EXACT.
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val end = millisAt(2024, 1, 1, 10, 0)
+        val installEvent = testBatteryChange(start, RemoteId.WEST, null, 2).map {
+            if (it.eventType == EventType.BATTERY_INSTALLED) it.copy(monotonicContinuityBroken = true) else it
+        }
+        val events = installEvent + testBatteryChange(end, RemoteId.WEST, 2, 3)
+
+        val cycle = engine.deriveCycles(events).single { it.batteryId == 2 }
+
+        assertEquals(RuntimeClassification.SHIFT_INTERRUPTED, cycle.classification)
+        assertFalse(cycle.includedInPrimaryStatistics)
+    }
+
+    @Test
+    fun `a reboot on one remote poisons an interval open on the other remote`() {
+        val westStart = millisAt(2024, 1, 1, 6, 0)
+        val eastStart = millisAt(2024, 1, 1, 6, 5)
+        val rebootTime = millisAt(2024, 1, 1, 7, 0)
+        val eastEnd = millisAt(2024, 1, 1, 10, 0)
+
+        val westInstall = testBatteryChange(westStart, RemoteId.WEST, null, 2)
+        val eastInstall = testBatteryChange(eastStart, RemoteId.EAST, null, 5)
+        val rebootMarker = testEvent(
+            timestamp = rebootTime,
+            remoteId = RemoteId.WEST,
+            batteryId = 2,
+            eventType = EventType.STATE_CONFIRMED
+        ).copy(monotonicContinuityBroken = true)
+        val eastClose = testBatteryChange(eastEnd, RemoteId.EAST, 5, 6)
+
+        val cycles = engine.deriveCycles(westInstall + eastInstall + listOf(rebootMarker) + eastClose)
+        val eastCycle = cycles.single { it.batteryId == 5 }
+
+        assertFalse(eastCycle.classification == RuntimeClassification.EXACT)
+        assertFalse(eastCycle.includedInPrimaryStatistics)
+    }
+
+    @Test
+    fun `a fresh interval started entirely after a reboot can still become exact`() {
+        // The reboot is stamped on the install that starts battery 2's interval - the
+        // interval itself begins after continuity was already lost at its own start point,
+        // matching an operator action recorded shortly after the tablet powers back on.
+        // A *new* interval, started with no anomaly at all, must not inherit that taint.
+        val rebootInstallTime = millisAt(2024, 1, 1, 6, 0)
+        val cleanStart = millisAt(2024, 1, 1, 6, 30)
+        val cleanEnd = millisAt(2024, 1, 1, 10, 0)
+
+        val rebootInstall = testBatteryChange(rebootInstallTime, RemoteId.WEST, null, 2).map {
+            if (it.eventType == EventType.BATTERY_INSTALLED) it.copy(monotonicContinuityBroken = true) else it
+        }
+        val cleanCycle = testBatteryChange(cleanStart, RemoteId.WEST, 2, 3) + testBatteryChange(cleanEnd, RemoteId.WEST, 3, 4)
+
+        val cycles = engine.deriveCycles(rebootInstall + cleanCycle)
+        val freshCycle = cycles.single { it.batteryId == 3 }
+
+        assertEquals(RuntimeClassification.EXACT, freshCycle.classification)
+        assertTrue(freshCycle.includedInPrimaryStatistics)
+    }
 }

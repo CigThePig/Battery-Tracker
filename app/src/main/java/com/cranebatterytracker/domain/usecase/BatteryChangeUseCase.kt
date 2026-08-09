@@ -41,8 +41,13 @@ class BatteryChangeUseCase(
                 throw BatteryTrackerException.BatteryOwnedByOtherRemote(otherRemote, newBatteryId)
             }
 
-            val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
             val currentBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
+            if (currentBatteryId != null && currentBatteryId == newBatteryId) {
+                throw BatteryTrackerException.BatteryAlreadyInThisRemote(newBatteryId)
+            }
+
+            val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
+            val monotonicContinuityBroken = ClockAnomalyDetector.monotonicContinuityLost(priorEvents, elapsedRealtimeMillis)
             val groupId = UUID.randomUUID().toString()
             val events = buildList {
                 if (currentBatteryId != null) {
@@ -59,7 +64,8 @@ class BatteryChangeUseCase(
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
                             wallClockAnomalyDetected = anomalyDetected,
-                            elapsedRealtimeMillis = elapsedRealtimeMillis
+                            elapsedRealtimeMillis = elapsedRealtimeMillis,
+                            monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
                 }
@@ -76,7 +82,8 @@ class BatteryChangeUseCase(
                         targetActionGroupId = null,
                         createdByAppVersion = appVersion,
                         wallClockAnomalyDetected = anomalyDetected,
-                        elapsedRealtimeMillis = elapsedRealtimeMillis
+                        elapsedRealtimeMillis = elapsedRealtimeMillis,
+                        monotonicContinuityBroken = monotonicContinuityBroken
                     )
                 )
                 if (anomalyDetected) {

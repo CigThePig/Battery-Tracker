@@ -18,6 +18,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.cranebatterytracker.backup.BackupStatus
 import com.cranebatterytracker.domain.model.BatteryHealth
 import com.cranebatterytracker.domain.model.BatteryTrend
 import com.cranebatterytracker.ui.common.formatDurationHoursMinutes
@@ -25,6 +26,10 @@ import com.cranebatterytracker.ui.theme.StatusBad
 import com.cranebatterytracker.ui.theme.StatusGood
 import com.cranebatterytracker.ui.theme.StatusUnknown
 import com.cranebatterytracker.ui.theme.StatusWarn
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
 @Composable
 fun DiagnosticsOverviewScreen(
@@ -38,10 +43,12 @@ fun DiagnosticsOverviewScreen(
     onOpenSettings: () -> Unit
 ) {
     val snapshot by viewModel.snapshot.collectAsState()
+    val backupStatus by viewModel.backupStatus.collectAsState()
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(text = "BATTERY RESULTS", style = MaterialTheme.typography.headlineMedium)
+            BackupStatusRow(backupStatus)
 
             LazyColumn(
                 modifier = Modifier.weight(1f).padding(vertical = 12.dp),
@@ -73,6 +80,49 @@ fun DiagnosticsOverviewScreen(
                 }
             }
         }
+    }
+}
+
+private val backupDateFormatter = DateTimeFormatter.ofPattern("MMM d, h:mm a")
+
+/**
+ * Surfaces automatic backup health here rather than on the main operator screen (spec
+ * review Issue 14): backups run silently in the background, and a failure that never
+ * shows up anywhere is effectively invisible until data is already needed and missing.
+ */
+@Composable
+private fun BackupStatusRow(status: BackupStatus) {
+    val zoneId = ZoneId.systemDefault()
+    val lastSuccessText = status.lastSuccessAtMillis?.let {
+        Instant.ofEpochMilli(it).atZone(zoneId).format(backupDateFormatter)
+    }
+    val daysSinceSuccess = status.lastSuccessAtMillis?.let {
+        ChronoUnit.DAYS.between(Instant.ofEpochMilli(it), Instant.now())
+    }
+    val isFailing = status.lastFailureMessage != null &&
+        (status.lastAttemptAtMillis == null || status.lastAttemptAtMillis != status.lastSuccessAtMillis)
+
+    val (text, color) = when {
+        isFailing -> {
+            val lastGood = when {
+                daysSinceSuccess == null -> "no successful backup yet"
+                daysSinceSuccess <= 0L -> "last good backup: today"
+                daysSinceSuccess == 1L -> "last good backup: 1 day ago"
+                else -> "last good backup: $daysSinceSuccess days ago"
+            }
+            "AUTOMATIC BACKUP FAILED — $lastGood" to StatusBad
+        }
+        lastSuccessText != null -> "Last successful backup: $lastSuccessText" to StatusGood
+        else -> null to null
+    }
+
+    if (text != null && color != null) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = color,
+            modifier = Modifier.padding(top = 4.dp)
+        )
     }
 }
 

@@ -27,12 +27,15 @@ object SeedData {
         )
     )
 
+    /**
+     * Idempotent per fixed entity, not per table (spec review Issue 16): both DAOs insert
+     * with [androidx.room.OnConflictStrategy.IGNORE], so re-running this against a table
+     * that already has some (but not all) of its rows quietly fills in only what's
+     * missing - e.g. Battery 3 alone missing from an otherwise-normal table. Gating on
+     * `count() == 0` would never repair that case, since the table is no longer empty.
+     */
     suspend fun ensureSeeded(batteryDao: BatteryDao, remoteDao: RemoteDao, now: Long = System.currentTimeMillis()) {
-        if (batteryDao.count() == 0) {
-            batteryDao.insertAll(batteries(now))
-        }
-        if (remoteDao.count() == 0) {
-            remoteDao.insertAll(remotes())
-        }
+        batteryDao.insertAll(batteries(now))
+        remoteDao.insertAll(remotes())
     }
 }

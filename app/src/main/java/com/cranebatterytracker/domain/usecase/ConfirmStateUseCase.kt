@@ -31,6 +31,7 @@ class ConfirmStateUseCase(
             val priorEvents = repository.currentEventsSnapshot()
             val knowledge = EventReducer.reduce(priorEvents)
             val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
+            val monotonicContinuityBroken = ClockAnomalyDetector.monotonicContinuityLost(priorEvents, elapsedRealtimeMillis)
             val groupId = UUID.randomUUID().toString()
 
             val events = buildList {
@@ -50,7 +51,8 @@ class ConfirmStateUseCase(
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
                             wallClockAnomalyDetected = anomalyDetected,
-                            elapsedRealtimeMillis = elapsedRealtimeMillis
+                            elapsedRealtimeMillis = elapsedRealtimeMillis,
+                            monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
                 }

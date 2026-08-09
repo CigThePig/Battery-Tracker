@@ -42,4 +42,22 @@ object ClockAnomalyDetector {
         val wallClockDelta = newWallClockMillis - previous.timestampEpochMillis
         return abs(wallClockDelta - monotonicDelta) > thresholdMillis
     }
+
+    /**
+     * True when the device's monotonic clock moved backward relative to the most
+     * recently *recorded* prior event - almost always an ordinary reboot (spec review
+     * Issue 12). [detect] deliberately treats this as "no wall-clock anomaly" so a reboot
+     * never falsely implies clock tampering, but a reboot still breaks the continuous
+     * monotonic timeline an EXACT classification depends on: elapsed time can no longer
+     * be compared across the gap. This is a distinct, milder fact from a wall-clock jump -
+     * "exact elapsed-time verification was unavailable across this point," not "the clock
+     * is wrong" - so it is reported separately rather than folded into [detect]'s result.
+     */
+    fun monotonicContinuityLost(priorEvents: List<DomainEvent>, newElapsedRealtimeMillis: Long): Boolean {
+        val previousElapsedRealtime = priorEvents
+            .filter { it.elapsedRealtimeMillis != null }
+            .maxByOrNull { it.sequenceNumber }
+            ?.elapsedRealtimeMillis ?: return false
+        return newElapsedRealtimeMillis < previousElapsedRealtime
+    }
 }

@@ -31,10 +31,14 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
         val suspiciousCount: Int,
         val shortCountLast10: Int,
         val westMedian: Long?,
+        val westCount: Int,
         val eastMedian: Long?,
+        val eastCount: Int,
         val baseline: Long?,
         val recentChangePercent: Double?
     )
+
+    private data class FleetRemoteMedians(val west: Double?, val east: Double?)
 
     /**
      * Health for every battery at once, so each one's trend can also be judged against
@@ -50,11 +54,11 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
         val stats = batteries.map { battery ->
             computeStats(battery, cyclesByBattery[battery.batteryId] ?: emptyList(), deadEventCounts[battery.batteryId] ?: 0)
         }
-        return stats.map { finalize(it, fleetMedianMillis(it, stats)) }
+        return stats.map { subject -> finalize(subject, normalizedFleetRatio(subject, fleetRemoteMedians(subject, stats))) }
     }
 
     fun batteryHealth(battery: Battery, cyclesForBattery: List<DerivedCycle>, deadEventCount: Int): BatteryHealth =
-        finalize(computeStats(battery, cyclesForBattery, deadEventCount), fleetMedianMillis = null)
+        finalize(computeStats(battery, cyclesForBattery, deadEventCount), fleetRatio = null)
 
     private fun computeStats(battery: Battery, cyclesForBattery: List<DerivedCycle>, deadEventCount: Int): BatteryStats {
         val exactCycles = cyclesForBattery
@@ -76,12 +80,10 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
             null
         }
 
-        val westMedian = Statistics.median(
-            reliableCycles.filter { it.remoteId == RemoteId.WEST }.map { it.minimumActiveRuntimeMillis }
-        )?.toLong()
-        val eastMedian = Statistics.median(
-            reliableCycles.filter { it.remoteId == RemoteId.EAST }.map { it.minimumActiveRuntimeMillis }
-        )?.toLong()
+        val westCycles = reliableCycles.filter { it.remoteId == RemoteId.WEST }
+        val eastCycles = reliableCycles.filter { it.remoteId == RemoteId.EAST }
+        val westMedian = Statistics.median(westCycles.map { it.minimumActiveRuntimeMillis })?.toLong()
+        val eastMedian = Statistics.median(eastCycles.map { it.minimumActiveRuntimeMillis })?.toLong()
 
         val shortCount = exactCycles.count { it.isShortRuntimeEvent }
         val suspiciousCount = exactCycles.count { it.isHighOutlier }
@@ -103,27 +105,64 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
             suspiciousCount = suspiciousCount,
             shortCountLast10 = shortCountLast10,
             westMedian = westMedian,
+            westCount = westCycles.size,
             eastMedian = eastMedian,
+            eastCount = eastCycles.size,
             baseline = baseline,
             recentChangePercent = recentChangePercent
         )
     }
 
-    /** Median lifetime runtime of [subject]'s peers - null unless enough of them have their own reliable baseline. */
-    private fun fleetMedianMillis(subject: BatteryStats, allStats: List<BatteryStats>): Double? {
-        val peerMedians = allStats
-            .filter { it.battery.batteryId != subject.battery.batteryId && it.reliableCycleCount >= config.minCyclesForTrend }
-            .mapNotNull { it.lifetimeMedian }
-        return if (peerMedians.size >= config.minPeerBatteriesForFleetComparison) Statistics.median(peerMedians) else null
+    /**
+     * Peer fleet medians computed separately per remote (spec review Issue 6): comparing
+     * a battery's overall lifetime median against the fleet's overall median confounds
+     * "this battery is weak" with "this battery happens to run mostly in the
+     * faster-draining remote." Only peers with enough of their own cycles in that remote
+     * count as evidence for it, mirroring [remoteDiagnostics]'s own remote pairing.
+     */
+    private fun fleetRemoteMedians(subject: BatteryStats, allStats: List<BatteryStats>): FleetRemoteMedians {
+        val peers = allStats.filter { it.battery.batteryId != subject.battery.batteryId }
+        val westPeerMedians = peers.filter { it.westCount >= config.minPairedCyclesPerRemote }.mapNotNull { it.westMedian }
+        val eastPeerMedians = peers.filter { it.eastCount >= config.minPairedCyclesPerRemote }.mapNotNull { it.eastMedian }
+        return FleetRemoteMedians(
+            west = if (westPeerMedians.size >= config.minPeerBatteriesForFleetComparison) Statistics.median(westPeerMedians) else null,
+            east = if (eastPeerMedians.size >= config.minPeerBatteriesForFleetComparison) Statistics.median(eastPeerMedians) else null
+        )
     }
 
-    private fun finalize(stats: BatteryStats, fleetMedianMillis: Double?): BatteryHealth {
+    /**
+     * Combines [subject]'s per-remote standing against its peers into one ratio, weighted
+     * by how many of the subject's own cycles came from each remote. A battery used
+     * mostly in one remote is judged mostly against that remote's peers rather than
+     * against a flat fleet-wide figure dominated by the other remote's typical runtime.
+     */
+    private fun normalizedFleetRatio(subject: BatteryStats, fleet: FleetRemoteMedians): Double? {
+        val westComponent = if (
+            subject.westCount >= config.minPairedCyclesPerRemote && subject.westMedian != null &&
+            fleet.west != null && fleet.west > 0
+        ) {
+            (subject.westMedian.toDouble() / fleet.west) to subject.westCount
+        } else null
+
+        val eastComponent = if (
+            subject.eastCount >= config.minPairedCyclesPerRemote && subject.eastMedian != null &&
+            fleet.east != null && fleet.east > 0
+        ) {
+            (subject.eastMedian.toDouble() / fleet.east) to subject.eastCount
+        } else null
+
+        val components = listOfNotNull(westComponent, eastComponent)
+        if (components.isEmpty()) return null
+        val totalWeight = components.sumOf { it.second }
+        return components.sumOf { (ratio, weight) -> ratio * weight } / totalWeight
+    }
+
+    private fun finalize(stats: BatteryStats, fleetRatio: Double?): BatteryHealth {
         val (trend, assessment) = computeTrend(
             stats.reliableCycleCount,
             stats.recentChangePercent,
             stats.shortCountLast10,
-            stats.lifetimeMedian,
-            fleetMedianMillis
+            fleetRatio
         )
         return BatteryHealth(
             batteryId = stats.battery.batteryId,
@@ -147,8 +186,7 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
         reliableCycleCount: Int,
         recentChangePercent: Double?,
         shortCountLast10: Int,
-        lifetimeMedianMillis: Long?,
-        fleetMedianMillis: Double?
+        fleetRatio: Double?
     ): Pair<BatteryTrend, String> {
         if (reliableCycleCount < config.minCyclesForTrend) {
             return BatteryTrend.NOT_ENOUGH_DATA to
@@ -161,11 +199,8 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
         // A battery that has always underperformed its peers has nothing of its own to
         // "decline" from, so recentChangePercent alone can never catch it - only a
         // comparison against the other batteries' typical runtime can (spec section 49).
-        val fleetRatio = if (lifetimeMedianMillis != null && fleetMedianMillis != null && fleetMedianMillis > 0) {
-            lifetimeMedianMillis / fleetMedianMillis
-        } else {
-            null
-        }
+        // [fleetRatio] is already normalized per remote (see normalizedFleetRatio) so a
+        // battery isn't penalized merely for running mostly in a faster-draining remote.
         val severelyBelowFleet = fleetRatio != null && fleetRatio <= config.fleetStrongUnderperformanceRatio
         val belowFleet = fleetRatio != null && fleetRatio <= config.fleetWatchUnderperformanceRatio
 
@@ -257,18 +292,22 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
     fun dataQuality(cycles: List<DerivedCycle>, correctionCount: Int): DataQualitySummary {
         val exactCycles = cycles.count { it.classification == RuntimeClassification.EXACT }
         val shiftInterruptedCycles = cycles.count { it.classification == RuntimeClassification.SHIFT_INTERRUPTED }
-        val unknownGaps = cycles.count {
-            it.classification == RuntimeClassification.UNKNOWN || it.classification == RuntimeClassification.CONFIRMED_MINIMUM
-        }
+        val unknownGaps = cycles.count { it.classification == RuntimeClassification.UNKNOWN }
+        val confirmedMinimumObservations = cycles.count { it.classification == RuntimeClassification.CONFIRMED_MINIMUM }
         val suspiciousHighCount = cycles.count { it.isHighOutlier }
 
-        val totalCoverage = (exactCycles + shiftInterruptedCycles + unknownGaps).coerceAtLeast(1)
-        val unknownRatio = unknownGaps.toDouble() / totalCoverage
+        // The overall level formula still treats a confirmed-minimum cycle as incomplete
+        // evidence - it isn't a completed measurement either - but it is no longer
+        // reported to the operator as an "unknown gap", which is a genuinely different,
+        // more pessimistic claim than the app actually has evidence for.
+        val incompleteCycles = unknownGaps + confirmedMinimumObservations
+        val totalCoverage = (exactCycles + shiftInterruptedCycles + incompleteCycles).coerceAtLeast(1)
+        val incompleteRatio = incompleteCycles.toDouble() / totalCoverage
 
         val overallLevel = when {
             exactCycles < config.limitedExactCycleThreshold -> DataQualityLevel.LIMITED
-            exactCycles < config.developingExactCycleThreshold || unknownRatio > config.highUnknownRatioThreshold -> DataQualityLevel.DEVELOPING
-            exactCycles < config.goodExactCycleThreshold || unknownRatio > config.moderateUnknownRatioThreshold -> DataQualityLevel.GOOD
+            exactCycles < config.developingExactCycleThreshold || incompleteRatio > config.highUnknownRatioThreshold -> DataQualityLevel.DEVELOPING
+            exactCycles < config.goodExactCycleThreshold || incompleteRatio > config.moderateUnknownRatioThreshold -> DataQualityLevel.GOOD
             else -> DataQualityLevel.STRONG
         }
 
@@ -276,6 +315,7 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
             exactCycles = exactCycles,
             shiftInterruptedCycles = shiftInterruptedCycles,
             unknownGaps = unknownGaps,
+            confirmedMinimumObservations = confirmedMinimumObservations,
             corrections = correctionCount,
             suspiciousHighCount = suspiciousHighCount,
             overallLevel = overallLevel

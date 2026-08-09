@@ -3,13 +3,11 @@ package com.cranebatterytracker.ui.batterypicker
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -82,24 +80,47 @@ fun BatteryPickerScreen(
                 ErrorBanner(message = message, onDismiss = viewModel::consumeError, modifier = Modifier.padding(top = 8.dp))
             }
 
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+            // A plain, non-lazy 2-wide grid rather than LazyVerticalGrid (spec review Issue
+            // 9): lazy layout children along the scrolling axis aren't measured like
+            // ordinary bounded cells, so the four battery buttons could collapse toward
+            // their minimum intrinsic height inside a mostly-empty grid. There will never
+            // be more than a handful of batteries, so a bounded Column of Rows gives each
+            // cell an explicit, predictable, glove-friendly share of the available space.
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(vertical = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(4.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(state.batteries) { battery ->
-                    val unavailable = battery.batteryId == state.unavailableBatteryId
-                    BatteryGridButton(
-                        number = battery.displayNumber,
-                        unavailableInRemote = if (unavailable) state.otherRemoteShortName else null,
-                        enabled = !state.submitting,
-                        onClick = { if (!unavailable) viewModel.selectBattery(battery.batteryId) }
-                    )
+                state.batteries.chunked(2).forEach { rowBatteries ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        rowBatteries.forEach { battery ->
+                            val ownedByOtherRemote = battery.batteryId == state.unavailableBatteryId
+                            val isCurrentBattery = battery.batteryId == state.currentBatteryId
+                            val unavailable = ownedByOtherRemote || isCurrentBattery
+                            val unavailableLabel = when {
+                                ownedByOtherRemote -> state.otherRemoteShortName?.let { "IN ${it.uppercase()}" }
+                                isCurrentBattery -> "CURRENT / JUST REMOVED"
+                                else -> null
+                            }
+                            BatteryGridButton(
+                                number = battery.displayNumber,
+                                unavailableLabel = unavailableLabel,
+                                enabled = !state.submitting,
+                                onClick = { if (!unavailable) viewModel.selectBattery(battery.batteryId) },
+                                modifier = Modifier.weight(1f).fillMaxHeight()
+                            )
+                        }
+                        // An odd final row (e.g. 3 batteries) still reserves the second
+                        // cell's space instead of stretching the lone button full-width.
+                        if (rowBatteries.size < 2) {
+                            Column(modifier = Modifier.weight(1f)) {}
+                        }
+                    }
                 }
             }
 
@@ -116,12 +137,18 @@ fun BatteryPickerScreen(
 }
 
 @Composable
-private fun BatteryGridButton(number: Int, unavailableInRemote: String?, enabled: Boolean, onClick: () -> Unit) {
-    val selectable = enabled && unavailableInRemote == null
+private fun BatteryGridButton(
+    number: Int,
+    unavailableLabel: String?,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.fillMaxSize()
+) {
+    val selectable = enabled && unavailableLabel == null
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = if (selectable) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.fillMaxSize()
+        modifier = modifier
     ) {
         Button(
             onClick = onClick,
@@ -134,9 +161,9 @@ private fun BatteryGridButton(number: Int, unavailableInRemote: String?, enabled
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(text = number.toString(), style = MaterialTheme.typography.headlineLarge)
-                if (unavailableInRemote != null) {
+                if (unavailableLabel != null) {
                     Text(
-                        text = "IN ${unavailableInRemote.uppercase()}",
+                        text = unavailableLabel,
                         style = MaterialTheme.typography.bodyMedium,
                         color = StatusUnknown
                     )
