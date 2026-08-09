@@ -46,83 +46,112 @@ class ScreenshotTest {
         composeTestRule.waitForIdle()
     }
 
+    /**
+     * Touch injection right after a cold emulator boot is flaky ("Failed to inject touch
+     * input") independent of anything the app does - retry with a short backoff rather
+     * than let one transient input-framework hiccup fail the whole screenshot run.
+     */
+    private fun retryAction(block: () -> Unit) {
+        var lastError: Throwable? = null
+        repeat(5) {
+            try {
+                composeTestRule.waitForIdle()
+                block()
+                return
+            } catch (t: Throwable) {
+                lastError = t
+                Thread.sleep(1000)
+            }
+        }
+        throw lastError!!
+    }
+
+    private fun clickText(text: String) = retryAction { composeTestRule.onNodeWithText(text).performClick() }
+
+    private fun clickAllText(text: String, index: Int = 0) =
+        retryAction { composeTestRule.onAllNodesWithText(text)[index].performClick() }
+
     @Test
     fun captureAllScreens() {
+        // Extra warm-up beyond settle(): give the emulator's window/input framework time to
+        // stabilize after a cold boot before the very first touch, since that first tap is
+        // where "Failed to inject touch input" is most likely to happen.
+        Thread.sleep(3000)
         settle()
         screenshot("01_main_initial")
 
         // Set West's battery.
-        composeTestRule.onAllNodesWithText("SET\nBATTERY")[0].performClick()
+        clickAllText("SET\nBATTERY")
         settle()
         screenshot("02_battery_picker_west")
-        composeTestRule.onNodeWithText("1").performClick()
+        clickText("1")
         settle()
         screenshot("03_battery_picker_saved")
         Thread.sleep(1300)
         settle()
 
         // Set East's battery.
-        composeTestRule.onAllNodesWithText("SET\nBATTERY")[0].performClick()
+        clickAllText("SET\nBATTERY")
         settle()
         screenshot("04_battery_picker_east")
-        composeTestRule.onNodeWithText("3").performClick()
+        clickText("3")
         settle()
         Thread.sleep(1300)
         settle()
         screenshot("05_main_both_set")
 
         // Change West's battery again to produce a completed cycle and the recent-action bar.
-        composeTestRule.onAllNodesWithText("CHANGE\nBATTERY")[0].performClick()
+        clickAllText("CHANGE\nBATTERY")
         settle()
-        composeTestRule.onNodeWithText("2").performClick()
+        clickText("2")
         settle()
         Thread.sleep(1300)
         settle()
         screenshot("06_main_recent_action")
 
         // Correction screen, reached by tapping the current battery number.
-        composeTestRule.onNodeWithText("2").performClick()
+        clickText("2")
         settle()
         screenshot("07_correction_screen")
-        composeTestRule.onNodeWithText("CANCEL").performClick()
+        clickText("CANCEL")
         settle()
 
         // Diagnostics and every sub-screen reachable from it.
-        composeTestRule.onNodeWithText("BATTERY RESULTS").performClick()
+        clickText("BATTERY RESULTS")
         settle()
         screenshot("08_diagnostics_overview")
 
-        composeTestRule.onNodeWithText("BATTERY 1").performClick()
+        clickText("BATTERY 1")
         settle()
         screenshot("09_battery_detail")
-        composeTestRule.onNodeWithText("← Back").performClick()
+        clickText("← Back")
         settle()
 
-        composeTestRule.onNodeWithText("WEST VS EAST").performClick()
+        clickText("WEST VS EAST")
         settle()
         screenshot("10_remote_comparison")
-        composeTestRule.onNodeWithText("← Back").performClick()
+        clickText("← Back")
         settle()
 
-        composeTestRule.onNodeWithText("DATA QUALITY").performClick()
+        clickText("DATA QUALITY")
         settle()
         screenshot("11_data_quality")
-        composeTestRule.onNodeWithText("← Back").performClick()
+        clickText("← Back")
         settle()
 
-        composeTestRule.onNodeWithText("EVENT HISTORY").performClick()
+        clickText("EVENT HISTORY")
         settle()
         screenshot("12_event_history")
-        composeTestRule.onNodeWithText("← Back").performClick()
+        clickText("← Back")
         settle()
 
-        composeTestRule.onNodeWithText("EXPORT").performClick()
+        clickText("EXPORT")
         settle()
         screenshot("13_export")
-        composeTestRule.onNodeWithText("← Back").performClick()
+        clickText("← Back")
         settle()
 
-        composeTestRule.onNodeWithText("SETTINGS").performClick()
+        clickText("SETTINGS")
         settle()
         screenshot("14_settings")
     }
