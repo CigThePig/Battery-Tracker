@@ -121,4 +121,54 @@ class CsvExporterTest {
         assertEquals("true", row[header.indexOf("monotonic_continuity_broken")])
         assertEquals("false", row[header.indexOf("wall_clock_anomaly_detected")])
     }
+
+    @Test
+    fun `a legacy warning sharing an undone action's group id is not exported as undone`() {
+        val undoneGroupId = "legacy-group"
+        val install = event("e1", sequenceNumber = 1, timestampEpochMillis = 1_000, remoteId = RemoteId.WEST, batteryId = 1)
+            .copy(actionGroupId = undoneGroupId)
+        // A pre-upgrade SYSTEM_TIME_WARNING that still shares the triggering action's
+        // group id, unlike current warnings which are always written with a null one.
+        val legacyWarning = DomainEvent(
+            eventId = "w1",
+            sequenceNumber = 2,
+            actionGroupId = undoneGroupId,
+            timestampEpochMillis = 1_000,
+            remoteId = RemoteId.WEST,
+            batteryId = null,
+            eventType = EventType.SYSTEM_TIME_WARNING,
+            previousBatteryId = null,
+            newBatteryId = null,
+            targetActionGroupId = null,
+            createdByAppVersion = "test",
+            wallClockAnomalyDetected = true,
+            elapsedRealtimeMillis = null,
+            notes = null
+        )
+        val undo = DomainEvent(
+            eventId = "u1",
+            sequenceNumber = 3,
+            actionGroupId = "undo-group",
+            timestampEpochMillis = 2_000,
+            remoteId = null,
+            batteryId = null,
+            eventType = EventType.UNDO_ACTION,
+            previousBatteryId = null,
+            newBatteryId = null,
+            targetActionGroupId = undoneGroupId,
+            createdByAppVersion = "test",
+            wallClockAnomalyDetected = false,
+            elapsedRealtimeMillis = null,
+            notes = null
+        )
+
+        val out = ByteArrayOutputStream()
+        CsvExporter.exportRawEvents(listOf(install, legacyWarning, undo), out)
+        val lines = out.toString().trim().lines()
+        val header = lines.first().split(",")
+        val rows = lines.drop(1).associateBy { it.split(",")[header.indexOf("event_id")] }
+
+        assertEquals("true", rows.getValue("e1").split(",")[header.indexOf("undone")])
+        assertEquals("false", rows.getValue("w1").split(",")[header.indexOf("undone")])
+    }
 }

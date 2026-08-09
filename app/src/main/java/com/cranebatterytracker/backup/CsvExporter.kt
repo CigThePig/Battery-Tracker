@@ -3,6 +3,7 @@ package com.cranebatterytracker.backup
 import com.cranebatterytracker.domain.analysis.EventFiltering
 import com.cranebatterytracker.domain.model.DerivedCycle
 import com.cranebatterytracker.domain.model.DomainEvent
+import com.cranebatterytracker.domain.model.EventType
 import java.io.OutputStream
 import java.io.OutputStreamWriter
 import java.time.Instant
@@ -45,7 +46,15 @@ object CsvExporter {
                 ).joinToString(",")
             )
             events.sortedBy { it.sequenceNumber }.forEach { event ->
-                val undone = event.actionGroupId != null && event.actionGroupId in undoneGroups
+                // Mirrors EventFiltering.effectiveChronologicalEvents exactly: a
+                // SYSTEM_TIME_WARNING is never treated as undone, even a legacy row
+                // persisted by an older build whose actionGroupId still equals the
+                // triggering action's now-undone group. Computing this any other way would
+                // let a downstream reconstruction that trusts this column discard the only
+                // evidence a clock/continuity anomaly happened.
+                val undone = event.eventType != EventType.SYSTEM_TIME_WARNING &&
+                    event.actionGroupId != null &&
+                    event.actionGroupId in undoneGroups
                 writer.appendLine(
                     listOf(
                         event.sequenceNumber.toString(),

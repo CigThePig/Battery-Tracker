@@ -76,7 +76,18 @@ class BackupManager(
         val targetFile = File(dailyDir, "${today.format(dateFormatter)}.db")
         if (targetFile.exists()) return@withContext
 
-        if (!checkpointFully()) {
+        // checkpointFully() opens the writable database and runs a PRAGMA - either step can
+        // throw (e.g. an SQLite I/O or corruption error), not just return false. That path
+        // sat outside any runCatching before, so the exception propagated straight out of
+        // this function; the app-level catch around the hourly backup loop then swallowed
+        // it silently, leaving Diagnostics showing a stale success with no sign every
+        // subsequent attempt was actually failing.
+        val checkpointResult = runCatching { checkpointFully() }
+        val checkpointCompleted = checkpointResult.getOrElse { throwable ->
+            recordStatus(success = false, message = "WAL checkpoint failed: ${throwable.message}")
+            return@withContext
+        }
+        if (!checkpointCompleted) {
             recordStatus(success = false, message = "WAL checkpoint did not fully complete; will retry later.")
             return@withContext
         }

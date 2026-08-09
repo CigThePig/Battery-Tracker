@@ -91,8 +91,8 @@ class CorrectStateUseCase(
 
             val events = buildList {
                 // Written first - see BatteryChangeUseCase for why a monotonic-only break
-                // needs its own group-independent marker ordered ahead of STATE_CORRECTED,
-                // which is about to open a new interval that must not inherit this taint.
+                // needs its own group-independent marker ordered ahead of anything that
+                // might open a new interval.
                 if (anomalyDetected) {
                     add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
                 } else if (monotonicContinuityBroken) {
@@ -104,6 +104,31 @@ class CorrectStateUseCase(
                             appVersion,
                             wallClockAnomalyDetected = false,
                             monotonicContinuityBroken = true
+                        )
+                    )
+                }
+                // Also written before STATE_CORRECTED, not after: this event only closes
+                // the other remote's interval, but it still carries the same continuity
+                // flag, and RuntimeAnalysisEngine poisons whatever is open at the moment it
+                // processes any flagged event - if this ran after STATE_CORRECTED, it would
+                // retroactively taint the interval STATE_CORRECTED just opened on this
+                // remote, even though that interval starts entirely after the reboot.
+                if (collision) {
+                    add(
+                        DomainEvent(
+                            eventId = UUID.randomUUID().toString(),
+                            actionGroupId = groupId,
+                            timestampEpochMillis = now,
+                            remoteId = otherRemote,
+                            batteryId = null,
+                            eventType = EventType.STATE_MARKED_UNKNOWN,
+                            previousBatteryId = newBatteryId,
+                            newBatteryId = null,
+                            targetActionGroupId = null,
+                            createdByAppVersion = appVersion,
+                            wallClockAnomalyDetected = anomalyDetected,
+                            elapsedRealtimeMillis = elapsedRealtimeMillis,
+                            monotonicContinuityBroken = monotonicContinuityBroken
                         )
                     )
                 }
@@ -124,25 +149,6 @@ class CorrectStateUseCase(
                         monotonicContinuityBroken = monotonicContinuityBroken
                     )
                 )
-                if (collision) {
-                    add(
-                        DomainEvent(
-                            eventId = UUID.randomUUID().toString(),
-                            actionGroupId = groupId,
-                            timestampEpochMillis = now,
-                            remoteId = otherRemote,
-                            batteryId = null,
-                            eventType = EventType.STATE_MARKED_UNKNOWN,
-                            previousBatteryId = newBatteryId,
-                            newBatteryId = null,
-                            targetActionGroupId = null,
-                            createdByAppVersion = appVersion,
-                            wallClockAnomalyDetected = anomalyDetected,
-                            elapsedRealtimeMillis = elapsedRealtimeMillis,
-                            monotonicContinuityBroken = monotonicContinuityBroken
-                        )
-                    )
-                }
             }
 
             repository.writeEventGroup(events)

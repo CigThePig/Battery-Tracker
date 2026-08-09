@@ -69,4 +69,27 @@ class RebootMarkerOrderingTest {
 
         assertEquals(RuntimeClassification.EXACT, battery2Cycle.classification)
     }
+
+    @Test
+    fun `the interval opened by a reboot-detecting collision correction can still become exact`() = runTest {
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+        val correctUseCase = CorrectStateUseCase(repository, "test")
+
+        changeUseCase(RemoteId.WEST, 1, now = millisAt(6, 0), elapsedRealtimeMillis = 1_000_000)
+        changeUseCase(RemoteId.EAST, 2, now = millisAt(6, 0), elapsedRealtimeMillis = 1_000_000)
+        // A reboot-detecting correction that also resolves a collision: the secondary
+        // STATE_MARKED_UNKNOWN event (closing East's interval) carries the same continuity
+        // flag as the STATE_CORRECTED event that opens West's new interval - it must not
+        // retroactively taint that new interval just because it shares the flag.
+        correctUseCase(RemoteId.WEST, newBatteryId = 2, now = millisAt(8, 0), elapsedRealtimeMillis = 5_000, resolveCollision = true)
+        changeUseCase(RemoteId.WEST, 3, now = millisAt(10, 0), elapsedRealtimeMillis = 5_000 + 2 * 3_600_000L)
+
+        val cycles = runtimeEngine.deriveCycles(repository.allEvents())
+        // Battery 2 also has an UNKNOWN cycle on East (closed by the collision), so this
+        // must disambiguate by remote too - West's is the interval under test here.
+        val battery2Cycle = cycles.single { it.batteryId == 2 && it.remoteId == RemoteId.WEST }
+
+        assertEquals(RuntimeClassification.EXACT, battery2Cycle.classification)
+    }
 }
