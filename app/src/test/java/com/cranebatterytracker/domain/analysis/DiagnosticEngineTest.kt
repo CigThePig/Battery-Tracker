@@ -1,6 +1,7 @@
 package com.cranebatterytracker.domain.analysis
 
 import com.cranebatterytracker.domain.model.Battery
+import com.cranebatterytracker.domain.model.BatteryTrend
 import com.cranebatterytracker.domain.model.DataQualityLevel
 import com.cranebatterytracker.domain.model.DerivedCycle
 import com.cranebatterytracker.domain.model.RemoteId
@@ -8,6 +9,7 @@ import com.cranebatterytracker.domain.model.RemoteWarningLevel
 import com.cranebatterytracker.domain.model.RuntimeClassification
 import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -127,5 +129,21 @@ class DiagnosticEngineTest {
         val summary = engine.remoteDiagnostics(batteries, cyclesByBattery)
         assertEquals(RemoteWarningLevel.NONE, summary.warningLevel)
         assertTrue(summary.message.contains("battery-specific", ignoreCase = true))
+    }
+
+    @Test
+    fun `strong assessment only claims the evidence that actually triggered it`() {
+        // Ten identical-duration cycles (no meaningful decline: change is ~0%, nowhere
+        // near the -45% strong threshold), but five of the most recent ten are flagged
+        // as short-runtime events - enough on its own to reach STRONG_REPLACEMENT_CANDIDATE.
+        val cycles = List(10) { i -> exactCycle(1, RemoteId.WEST, 5 * 3_600_000L, i * 1_000_000L) }
+            .mapIndexed { index, cycle -> if (index >= 5) cycle.copy(isShortRuntimeEvent = true) else cycle }
+
+        val health = engine.batteryHealth(battery(1), cycles, deadEventCount = 0)
+
+        assertEquals(BatteryTrend.STRONG_REPLACEMENT_CANDIDATE, health.trend)
+        assertTrue(health.assessment.contains("short cycles are frequent", ignoreCase = true))
+        // Must not claim a severe baseline decline that never happened.
+        assertFalse(health.assessment.contains("far below", ignoreCase = true))
     }
 }

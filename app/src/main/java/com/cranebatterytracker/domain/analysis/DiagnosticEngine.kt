@@ -88,10 +88,24 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
                 "Not enough reliable cycles yet to draw a conclusion about this battery."
         }
         val change = recentChangePercent
+        val severeDecline = change != null && change <= config.strongChangePercent
+        val frequentShortCycles = shortCountLast10 >= config.strongShortCountLast10
+
         return when {
-            (change != null && change <= config.strongChangePercent) || shortCountLast10 >= config.strongShortCountLast10 ->
-                BatteryTrend.STRONG_REPLACEMENT_CANDIDATE to
-                    "Recent runtime is far below this battery's historical baseline and short cycles are frequent. Strong replacement candidate."
+            severeDecline || frequentShortCycles -> {
+                // State only the evidence that actually triggered this - claiming both a
+                // severe decline and frequent short cycles when only one is true would
+                // put a "short cycles are frequent" claim next to a count of zero.
+                val reason = when {
+                    severeDecline && frequentShortCycles ->
+                        "Recent runtime is far below this battery's historical baseline and short cycles are frequent."
+                    severeDecline ->
+                        "Recent runtime is far below this battery's historical baseline."
+                    else ->
+                        "Short cycles are frequent in this battery's recent history."
+                }
+                BatteryTrend.STRONG_REPLACEMENT_CANDIDATE to "$reason Strong replacement candidate."
+            }
 
             change != null && change <= config.decliningChangePercent ->
                 BatteryTrend.DECLINING to

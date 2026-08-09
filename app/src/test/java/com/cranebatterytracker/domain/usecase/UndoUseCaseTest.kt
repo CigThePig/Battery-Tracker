@@ -67,4 +67,23 @@ class UndoUseCaseTest {
         val error = runCatching { undoUseCase(now = 1_000) }.exceptionOrNull()
         assertTrue(error is BatteryTrackerException.NothingToUndo)
     }
+
+    @Test
+    fun `undo picks the most recently recorded action even after a backward clock correction`() = runTest {
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+        val undoUseCase = UndoUseCase(repository, "test")
+
+        changeUseCase(RemoteId.WEST, 1, now = 10_000)
+        // The clock is corrected backward before the next real action, so this is recorded
+        // later (higher insertion sequence) but stamped with an earlier wall-clock time.
+        changeUseCase(RemoteId.WEST, 2, now = 9_000)
+
+        undoUseCase(now = 9_500)
+
+        // Must undo the truly-latest action (1 -> 2), landing back on battery 1 - not the
+        // wall-clock-latest-looking one, which would incorrectly leave battery 2 in place.
+        val knowledge = EventReducer.reduce(repository.allEvents())
+        assertEquals(1, (knowledge.getValue(RemoteId.WEST) as RemoteKnowledge.Known).batteryId)
+    }
 }

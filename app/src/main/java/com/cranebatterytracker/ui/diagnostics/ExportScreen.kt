@@ -14,8 +14,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -29,15 +29,22 @@ private enum class ExportTarget { RAW_EVENTS, DERIVED_CYCLES, DATABASE_COPY }
 fun ExportScreen(viewModel: ExportViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var statusMessage by remember { mutableStateOf<String?>(null) }
-    var pendingTarget by remember { mutableStateOf(ExportTarget.RAW_EVENTS) }
+    var statusMessage by rememberSaveable { mutableStateOf<String?>(null) }
+    // The system document picker can background this app long enough for the OS to
+    // destroy and recreate the activity before delivering its result. A plain `remember`
+    // would reset to RAW_EVENTS on recreation and silently write the wrong CSV/DB format
+    // into the file the operator already named for a different export - rememberSaveable
+    // (backed by a plain String, since enums aren't guaranteed Bundle-savable) survives that.
+    var pendingTargetName by rememberSaveable { mutableStateOf(ExportTarget.RAW_EVENTS.name) }
+    val pendingTarget: ExportTarget = ExportTarget.valueOf(pendingTargetName)
 
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        val target = pendingTarget
         scope.launch {
             runCatching {
                 context.contentResolver.openOutputStream(uri)?.use { out ->
-                    when (pendingTarget) {
+                    when (target) {
                         ExportTarget.RAW_EVENTS -> viewModel.exportRawEvents(out)
                         ExportTarget.DERIVED_CYCLES -> viewModel.exportDerivedCycles(out)
                         ExportTarget.DATABASE_COPY -> viewModel.exportDatabaseCopy(out)
@@ -52,7 +59,7 @@ fun ExportScreen(viewModel: ExportViewModel, onBack: () -> Unit) {
     }
 
     fun startExport(target: ExportTarget, suggestedName: String) {
-        pendingTarget = target
+        pendingTargetName = target.name
         statusMessage = null
         launcher.launch(suggestedName)
     }

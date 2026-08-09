@@ -16,10 +16,14 @@ object ClockAnomalyDetector {
 
     /**
      * True when [newWallClockMillis]/[newElapsedRealtimeMillis] disagree with the most
-     * recent prior event that also recorded a monotonic reading by more than
-     * [thresholdMillis]. Returns false (no anomaly) when there is nothing to compare
-     * against, or when the monotonic clock went backwards - that means the device
-     * rebooted, which is an ordinary event, not clock tampering.
+     * recently *recorded* prior event that also captured a monotonic reading, by more
+     * than [thresholdMillis]. "Most recently recorded" is by insertion sequence, not by
+     * wall-clock time: after a backward clock correction, the event with the highest
+     * timestamp is the stale pre-correction one, and comparing against it would flag
+     * every ordinary event for a while as anomalous until wall time caught back up.
+     * Returns false (no anomaly) when there is nothing to compare against, or when the
+     * monotonic clock went backwards - that means the device rebooted, which is an
+     * ordinary event, not clock tampering.
      */
     fun detect(
         priorEvents: List<DomainEvent>,
@@ -29,7 +33,7 @@ object ClockAnomalyDetector {
     ): Boolean {
         val previous = priorEvents
             .filter { it.elapsedRealtimeMillis != null }
-            .maxByOrNull { it.timestampEpochMillis } ?: return false
+            .maxByOrNull { it.sequenceNumber } ?: return false
 
         val previousElapsedRealtime = previous.elapsedRealtimeMillis ?: return false
         val monotonicDelta = newElapsedRealtimeMillis - previousElapsedRealtime

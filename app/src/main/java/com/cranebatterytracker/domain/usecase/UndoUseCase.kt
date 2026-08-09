@@ -25,9 +25,12 @@ class UndoUseCase(
             val allEvents = repository.currentEventsSnapshot()
             val undoneGroups = EventFiltering.undoneActionGroupIds(allEvents)
 
+            // "Most recent" means most recently recorded, not highest wall-clock time - a
+            // backward clock correction must not make an older action look newer again
+            // (same reasoning as EventFiltering's replay order).
             val target = targetActionGroupId ?: allEvents
                 .filter { it.eventType != EventType.UNDO_ACTION && it.actionGroupId != null && it.actionGroupId !in undoneGroups }
-                .maxByOrNull { it.timestampEpochMillis }
+                .maxByOrNull { it.sequenceNumber }
                 ?.actionGroupId
                 ?: throw BatteryTrackerException.NothingToUndo
 

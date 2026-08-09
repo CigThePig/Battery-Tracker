@@ -87,6 +87,7 @@ private fun SettingsContent(settings: AppSettings, viewModel: SettingsViewModel,
 
     var dailyRetention by remember(settings) { mutableStateOf(settings.dailyBackupRetentionCount.toString()) }
     var archiveRetention by remember(settings) { mutableStateOf(settings.archiveBackupRetentionCount.toString()) }
+    var backupRetentionError by remember { mutableStateOf<String?>(null) }
 
     var newPin by remember { mutableStateOf("") }
 
@@ -136,12 +137,20 @@ private fun SettingsContent(settings: AppSettings, viewModel: SettingsViewModel,
             Text(text = "BACKUP RETENTION", style = MaterialTheme.typography.titleMedium)
             TimeField("Daily backups to keep", dailyRetention) { dailyRetention = it.filter(Char::isDigit) }
             TimeField("Archive backups to keep", archiveRetention) { archiveRetention = it.filter(Char::isDigit) }
+            backupRetentionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(
                 onClick = {
-                    viewModel.updateBackupRetention(
-                        dailyRetention.toIntOrNull() ?: settings.dailyBackupRetentionCount,
-                        archiveRetention.toIntOrNull() ?: settings.archiveBackupRetentionCount
-                    )
+                    val daily = dailyRetention.toIntOrNull()
+                    val archive = archiveRetention.toIntOrNull()
+                    // Zero (or blank/invalid) retention means the very next hourly prune
+                    // deletes every backup immediately, silently leaving no recoverable
+                    // snapshot - never treat that as a valid value to save.
+                    if (daily == null || daily < 1 || archive == null || archive < 1) {
+                        backupRetentionError = "Both counts must be at least 1 backup."
+                    } else {
+                        viewModel.updateBackupRetention(daily, archive)
+                        backupRetentionError = null
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             ) { Text("SAVE BACKUP RETENTION") }

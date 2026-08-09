@@ -48,4 +48,25 @@ class ClockAnomalyDetectorTest {
         val anomaly = ClockAnomalyDetector.detect(prior, newWallClockMillis = 1_000 + 60_000L, newElapsedRealtimeMillis = 500 + 30_000L)
         assertFalse(anomaly)
     }
+
+    @Test
+    fun `compares against the most recently recorded event, not the one with the highest timestamp`() {
+        // A real action at 10:00 (higher wall-clock time, but recorded first).
+        val preCorrection = eventWithClock(wallClock = 36_000_000L, elapsedRealtime = 1_000_000L)
+        // The clock is then corrected back to 09:00 and a second real action is recorded
+        // 10ms later in real time - lower wall-clock time, but the truly latest event.
+        val postCorrection = eventWithClock(wallClock = 32_400_000L, elapsedRealtime = 1_000_010L)
+
+        // A third, perfectly ordinary action five real minutes after the correction.
+        val anomaly = ClockAnomalyDetector.detect(
+            priorEvents = listOf(preCorrection, postCorrection),
+            newWallClockMillis = 32_400_000L + 5 * 60_000L,
+            newElapsedRealtimeMillis = 1_000_010L + 5 * 60_000L
+        )
+
+        // Comparing against the pre-correction event (max timestamp) would see a ~55
+        // minute wall-clock/monotonic mismatch and wrongly flag this. Comparing against
+        // the actually-latest event agrees perfectly.
+        assertFalse(anomaly)
+    }
 }
