@@ -1,5 +1,6 @@
 package com.cranebatterytracker.domain.usecase
 
+import com.cranebatterytracker.domain.analysis.ClockAnomalyDetector
 import com.cranebatterytracker.domain.analysis.EventFiltering
 import com.cranebatterytracker.domain.model.DomainEvent
 import com.cranebatterytracker.domain.model.EventType
@@ -36,11 +37,20 @@ class UndoUseCase(
 
             if (target in undoneGroups) throw BatteryTrackerException.ActionAlreadyUndone
 
-            repository.writeEventGroup(
-                listOf(
+            // Undo can be the very first interaction after the device clock changes. If it
+            // unconditionally recorded no anomaly, the next normal action would compare
+            // against this event, see matching wall-clock/monotonic deltas, and the jump
+            // would go undetected entirely - so this needs the same check every other
+            // write path runs.
+            val anomalyDetected = ClockAnomalyDetector.detect(allEvents, now, elapsedRealtimeMillis)
+            val groupId = UUID.randomUUID().toString()
+            val targetRemoteId = allEvents.firstOrNull { it.actionGroupId == target }?.remoteId
+
+            val events = buildList {
+                add(
                     DomainEvent(
                         eventId = UUID.randomUUID().toString(),
-                        actionGroupId = UUID.randomUUID().toString(),
+                        actionGroupId = groupId,
                         timestampEpochMillis = now,
                         remoteId = null,
                         batteryId = null,
@@ -49,11 +59,17 @@ class UndoUseCase(
                         newBatteryId = null,
                         targetActionGroupId = target,
                         createdByAppVersion = appVersion,
-                        wallClockAnomalyDetected = false,
+                        wallClockAnomalyDetected = anomalyDetected,
                         elapsedRealtimeMillis = elapsedRealtimeMillis
                     )
                 )
-            )
+                // UNDO_ACTION events are filtered out of the replay stream entirely
+                // (EventFiltering), so this warning event is what actually carries the
+                // anomaly flag into RuntimeAnalysisEngine and poisons any open interval.
+                if (anomalyDetected) add(systemTimeWarningEvent(targetRemoteId, groupId, now, appVersion))
+            }
+
+            repository.writeEventGroup(events)
         }
     }
 }

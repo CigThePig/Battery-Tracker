@@ -22,6 +22,7 @@ class RuntimeAnalysisEngine(
         val batteryId: Int,
         val startTimestamp: Long,
         val startEventId: String,
+        val startSequenceNumber: Long,
         var hasClockAnomaly: Boolean,
         var lastConfirmedAt: Long,
         var lastConfirmedEventId: String
@@ -37,6 +38,16 @@ class RuntimeAnalysisEngine(
         val cycles = mutableListOf<DerivedCycle>()
 
         for (event in effective) {
+            // A clock jump is device-wide - it corrupts the wall-clock duration of every
+            // interval open at that instant, not just the one tied to whichever remote's
+            // event happened to detect it (e.g. a jump surfaced while changing West must
+            // still poison an interval that's open on East). This must run before the
+            // remoteId null-check below so it also sees anomaly warnings that aren't
+            // themselves tied to a single remote, such as the one Undo can emit.
+            if (event.wallClockAnomalyDetected) {
+                open.values.forEach { it.hasClockAnomaly = true }
+            }
+
             val remoteId = event.remoteId ?: continue
             when (event.eventType) {
                 EventType.BATTERY_INSTALLED -> {
@@ -47,6 +58,7 @@ class RuntimeAnalysisEngine(
                             batteryId = newBatteryId,
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
+                            startSequenceNumber = event.sequenceNumber,
                             hasClockAnomaly = event.wallClockAnomalyDetected,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
@@ -70,6 +82,7 @@ class RuntimeAnalysisEngine(
                             batteryId = newBatteryId,
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
+                            startSequenceNumber = event.sequenceNumber,
                             hasClockAnomaly = event.wallClockAnomalyDetected,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
@@ -87,11 +100,6 @@ class RuntimeAnalysisEngine(
                     if (current != null && current.batteryId == event.batteryId) {
                         current.lastConfirmedAt = event.timestampEpochMillis
                         current.lastConfirmedEventId = event.eventId
-                        // A clock anomaly detected on a confirmation *inside* the interval
-                        // must still poison the whole interval - only checking the start
-                        // and end events would miss a jump that happened in between and
-                        // then quietly resolved before the interval closed.
-                        if (event.wallClockAnomalyDetected) current.hasClockAnomaly = true
                     }
                 }
 
@@ -130,6 +138,7 @@ class RuntimeAnalysisEngine(
             batteryId = interval.batteryId,
             remoteId = remoteId,
             startTimestamp = interval.startTimestamp,
+            startSequenceNumber = interval.startSequenceNumber,
             endTimestamp = endEvent.timestampEpochMillis,
             minimumActiveRuntimeMillis = minimum,
             maximumActiveRuntimeMillis = if (classification == RuntimeClassification.EXACT) minimum else maximum,
@@ -148,37 +157,47 @@ class RuntimeAnalysisEngine(
         return if (hadIntermediateConfirmation) {
             confirmedMinimum(interval, remoteId)
         } else {
-            DerivedCycle(
-                cycleId = stableCycleId(interval.startEventId, null),
-                batteryId = interval.batteryId,
-                remoteId = remoteId,
-                startTimestamp = interval.startTimestamp,
-                endTimestamp = null,
-                minimumActiveRuntimeMillis = 0,
-                maximumActiveRuntimeMillis = 0,
-                classification = RuntimeClassification.UNKNOWN,
-                isHighOutlier = false,
-                isShortRuntimeEvent = false,
-                includedInPrimaryStatistics = false,
-                startEventId = interval.startEventId,
-                endEventId = null
-            )
+            unknownCycle(interval, remoteId)
         }
     }
+
+    private fun unknownCycle(interval: OpenInterval, remoteId: RemoteId): DerivedCycle = DerivedCycle(
+        cycleId = stableCycleId(interval.startEventId, null),
+        batteryId = interval.batteryId,
+        remoteId = remoteId,
+        startTimestamp = interval.startTimestamp,
+        startSequenceNumber = interval.startSequenceNumber,
+        endTimestamp = null,
+        minimumActiveRuntimeMillis = 0,
+        maximumActiveRuntimeMillis = 0,
+        classification = RuntimeClassification.UNKNOWN,
+        isHighOutlier = false,
+        isShortRuntimeEvent = false,
+        includedInPrimaryStatistics = false,
+        startEventId = interval.startEventId,
+        endEventId = null
+    )
 
     /**
      * A reliable lower bound on how long [interval]'s battery has run: from its start
      * to its last confirmation. Used both when a correction/unknown-marking closes an
      * interval that had at least one confirmation, and for intervals that are still
      * open when the log ends but were confirmed at least once (spec section 33).
+     *
+     * If a clock anomaly touched this interval at any point, that lower bound can't be
+     * trusted either - the elapsed time to the confirmation was measured against a wall
+     * clock known to have jumped, so this falls back to UNKNOWN rather than presenting
+     * an inflated or otherwise wrong duration as a reliable minimum.
      */
     private fun confirmedMinimum(interval: OpenInterval, remoteId: RemoteId): DerivedCycle {
+        if (interval.hasClockAnomaly) return unknownCycle(interval, remoteId)
         val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, interval.lastConfirmedAt)
         return DerivedCycle(
             cycleId = stableCycleId(interval.startEventId, interval.lastConfirmedEventId),
             batteryId = interval.batteryId,
             remoteId = remoteId,
             startTimestamp = interval.startTimestamp,
+            startSequenceNumber = interval.startSequenceNumber,
             endTimestamp = interval.lastConfirmedAt,
             minimumActiveRuntimeMillis = minimum,
             maximumActiveRuntimeMillis = maximum,
@@ -201,7 +220,11 @@ class RuntimeAnalysisEngine(
         val shortCycleIds = mutableSetOf<String>()
 
         for ((_, batteryCycles) in byBattery) {
-            val chronological = batteryCycles.sortedBy { it.startTimestamp }
+            // Insertion order, not wall-clock time: a backward clock correction can give a
+            // genuinely later cycle an earlier startTimestamp than an older one, which
+            // would silently swap which cycles count as "recent" for outlier/short-cycle
+            // detection.
+            val chronological = batteryCycles.sortedBy { it.startSequenceNumber }
             val durations = chronological.map { it.minimumActiveRuntimeMillis }
 
             if (durations.size >= config.minReliableCyclesForOutlierDetection) {

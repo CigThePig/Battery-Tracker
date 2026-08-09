@@ -37,4 +37,21 @@ class ClockAnomalyUseCaseTest {
         assertTrue(events.none { it.wallClockAnomalyDetected })
         assertTrue(events.none { it.eventType == EventType.SYSTEM_TIME_WARNING })
     }
+
+    @Test
+    fun `a wall-clock jump detected by Undo is still recorded as a warning`() = runTest {
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+        val undoUseCase = UndoUseCase(repository, "test")
+
+        // First event anchors the monotonic clock.
+        changeUseCase(RemoteId.WEST, 1, now = 1_000, elapsedRealtimeMillis = 500)
+        // Undo is the first interaction after the clock jumps forward an hour - if Undo
+        // never ran anomaly detection, this jump would go completely unnoticed.
+        undoUseCase(now = 1_000 + 3_600_000L, elapsedRealtimeMillis = 1_500)
+
+        val events = repository.allEvents()
+        assertTrue(events.any { it.eventType == EventType.UNDO_ACTION && it.wallClockAnomalyDetected })
+        assertTrue(events.any { it.eventType == EventType.SYSTEM_TIME_WARNING })
+    }
 }

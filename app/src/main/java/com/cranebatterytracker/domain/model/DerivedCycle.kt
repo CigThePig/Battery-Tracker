@@ -10,6 +10,7 @@ data class DerivedCycle(
     val batteryId: Int,
     val remoteId: RemoteId,
     val startTimestamp: Long,
+    val startSequenceNumber: Long,
     val endTimestamp: Long?,
     val minimumActiveRuntimeMillis: Long,
     val maximumActiveRuntimeMillis: Long,

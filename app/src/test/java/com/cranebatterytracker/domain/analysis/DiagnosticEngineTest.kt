@@ -17,12 +17,22 @@ class DiagnosticEngineTest {
 
     private val engine = DiagnosticEngine()
 
-    private fun exactCycle(batteryId: Int, remoteId: RemoteId, durationMillis: Long, startTimestamp: Long): DerivedCycle =
+    private fun exactCycle(
+        batteryId: Int,
+        remoteId: RemoteId,
+        durationMillis: Long,
+        startTimestamp: Long,
+        // Defaults to matching startTimestamp, since most tests construct cycles in
+        // increasing order of both anyway; pass a distinct value to simulate a backward
+        // clock correction, where insertion order and wall-clock order disagree.
+        startSequenceNumber: Long = startTimestamp
+    ): DerivedCycle =
         DerivedCycle(
             cycleId = UUID.randomUUID().toString(),
             batteryId = batteryId,
             remoteId = remoteId,
             startTimestamp = startTimestamp,
+            startSequenceNumber = startSequenceNumber,
             endTimestamp = startTimestamp + durationMillis,
             minimumActiveRuntimeMillis = durationMillis,
             maximumActiveRuntimeMillis = durationMillis,
@@ -145,5 +155,49 @@ class DiagnosticEngineTest {
         assertTrue(health.assessment.contains("short cycles are frequent", ignoreCase = true))
         // Must not claim a severe baseline decline that never happened.
         assertFalse(health.assessment.contains("far below", ignoreCase = true))
+    }
+
+    @Test
+    fun `a battery that has always been weak relative to its peers is not permanently STABLE`() {
+        val batteries = (1..4).map(::battery)
+        // Battery 1 has always lasted 3.6h; the other three have always lasted 5.2h. No
+        // battery declines from its own baseline, so only a fleet-relative comparison can
+        // catch battery 1 - this mirrors the documented replacement-candidate scenario.
+        val cyclesByBattery = batteries.associate { b ->
+            val duration = if (b.batteryId == 1) (3 * 3_600_000L + 36 * 60_000L) else (5 * 3_600_000L + 12 * 60_000L)
+            val cycles = (0 until 6).map { i -> exactCycle(b.batteryId, RemoteId.WEST, duration, i * 1_000_000L) }
+            b.batteryId to cycles
+        }
+
+        val healths = engine.batteryHealths(batteries, cyclesByBattery, emptyMap())
+        val weakBattery = healths.single { it.batteryId == 1 }
+        val peerBattery = healths.single { it.batteryId == 2 }
+
+        assertEquals(BatteryTrend.STRONG_REPLACEMENT_CANDIDATE, weakBattery.trend)
+        assertTrue(weakBattery.assessment.contains("consistently runs far shorter", ignoreCase = true))
+        assertEquals(BatteryTrend.STABLE, peerBattery.trend)
+    }
+
+    @Test
+    fun `a severe decline is still detected after a backward clock correction reverses wall-clock order`() {
+        // Truly first (by insertion sequence): 5 healthy 5-hour cycles.
+        val baselineCycles = (1..5).map { seq ->
+            exactCycle(1, RemoteId.WEST, 5 * 3_600_000L, startTimestamp = (100 + seq) * 1_000_000L, startSequenceNumber = seq.toLong())
+        }
+        // Truly later: 10 badly declined 2-hour cycles, but recorded with wall-clock
+        // timestamps *before* the baseline cycles above - e.g. the tablet clock was reset
+        // backward right before these were written.
+        val declinedCycles = (6..15).map { seq ->
+            exactCycle(1, RemoteId.WEST, 2 * 3_600_000L, startTimestamp = (seq - 5) * 100_000L, startSequenceNumber = seq.toLong())
+        }
+
+        val health = engine.batteryHealth(battery(1), baselineCycles + declinedCycles, deadEventCount = 0)
+
+        // Sorting by startTimestamp would put the declined cycles first (as "baseline")
+        // and mix them with the healthy ones in "recent", hiding the decline entirely.
+        // Sorting by insertion sequence (correct) puts the healthy cycles in baseline and
+        // the declined ones in recent, correctly showing a severe decline.
+        assertEquals(BatteryTrend.STRONG_REPLACEMENT_CANDIDATE, health.trend)
+        assertTrue(health.recentChangePercent != null && health.recentChangePercent!! <= -45.0)
     }
 }

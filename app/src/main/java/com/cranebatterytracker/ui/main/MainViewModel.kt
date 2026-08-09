@@ -96,11 +96,15 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         }
 
         val effective = EventFiltering.effectiveChronologicalEvents(events)
+        // Insertion sequence, not wall-clock time, decides which group is "latest" - a
+        // backward clock correction can give a freshly saved group a lower timestamp than
+        // an older one, which would hide its undo banner entirely. The timestamp is still
+        // used below, but only to decide how long to keep displaying the banner.
         val latestGroupEvents = effective
             .filter { it.actionGroupId != null }
             .groupBy { it.actionGroupId }
             .values
-            .maxByOrNull { group -> group.maxOf { it.timestampEpochMillis } }
+            .maxByOrNull { group -> group.maxOf { it.sequenceNumber } }
 
         val recentGroupId = latestGroupEvents?.firstOrNull()?.actionGroupId
         val recentTimestamp = latestGroupEvents?.maxOfOrNull { it.timestampEpochMillis }
@@ -165,12 +169,11 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     fun confirmBothAtShiftStart() {
         val westKnown = uiState.value.west?.state is RemoteState.Confirmed || uiState.value.west?.state is RemoteState.Stale
         val eastKnown = uiState.value.east?.state is RemoteState.Confirmed || uiState.value.east?.state is RemoteState.Stale
-        val remotesToConfirm = buildList {
-            if (westKnown) add(RemoteId.WEST)
-            if (eastKnown) add(RemoteId.EAST)
-        }
-        if (remotesToConfirm.isEmpty()) {
-            dismissedShiftBannerAt.value = System.currentTimeMillis()
+        if (!westKnown || !eastKnown) {
+            // A partial confirmation must never be reported as "both correct" - that would
+            // dismiss the banner and silently drop the still-unknown remote's prominent
+            // correction prompt while implying it had already been handled.
+            transientError.value = "Set the unknown remote's battery before confirming both are correct."
             return
         }
         if (busy.value) return
@@ -179,7 +182,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             // Both confirmations are written as one action group so the permanent
             // Undo control reverses this single button press atomically.
             runCatching {
-                container.confirmStateUseCase(*remotesToConfirm.toTypedArray(), elapsedRealtimeMillis = SystemClock.elapsedRealtime())
+                container.confirmStateUseCase(RemoteId.WEST, RemoteId.EAST, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
             }.onFailure { transientError.value = it.message }
             dismissedShiftBannerAt.value = System.currentTimeMillis()
             busy.value = false

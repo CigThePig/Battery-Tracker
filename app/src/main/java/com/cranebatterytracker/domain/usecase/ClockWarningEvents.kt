@@ -5,9 +5,13 @@ import com.cranebatterytracker.domain.model.EventType
 import com.cranebatterytracker.domain.model.RemoteId
 import java.util.UUID
 
-/** A SYSTEM_TIME_WARNING event recording that a clock anomaly was detected around this action (spec section 57/67). */
+/**
+ * A SYSTEM_TIME_WARNING event recording that a clock anomaly was detected around this
+ * action (spec section 57/67). [remoteId] is nullable because some actions that can
+ * detect an anomaly - Undo, in particular - aren't inherently tied to a single remote.
+ */
 internal fun systemTimeWarningEvent(
-    remoteId: RemoteId,
+    remoteId: RemoteId?,
     actionGroupId: String,
     timestamp: Long,
     appVersion: String

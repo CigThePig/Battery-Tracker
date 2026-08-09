@@ -228,4 +228,52 @@ class RuntimeAnalysisEngineTest {
         val cycles = engine.deriveCycles(install)
         assertTrue(cycles.none { it.batteryId == 3 })
     }
+
+    @Test
+    fun `a clock jump detected on one remote poisons an interval open on the other remote`() {
+        val westStart = millisAt(2024, 1, 1, 6, 0)
+        val eastStart = millisAt(2024, 1, 1, 6, 5)
+        val anomalyTime = millisAt(2024, 1, 1, 7, 0)
+        val eastEnd = millisAt(2024, 1, 1, 10, 0)
+
+        val westInstall = testBatteryChange(westStart, RemoteId.WEST, null, 2)
+        val eastInstall = testBatteryChange(eastStart, RemoteId.EAST, null, 5)
+        val anomalousWestConfirmation = testEvent(
+            timestamp = anomalyTime,
+            remoteId = RemoteId.WEST,
+            batteryId = 2,
+            eventType = EventType.STATE_CONFIRMED
+        ).copy(wallClockAnomalyDetected = true)
+        val eastClose = testBatteryChange(eastEnd, RemoteId.EAST, 5, 6)
+
+        val cycles = engine.deriveCycles(westInstall + eastInstall + listOf(anomalousWestConfirmation) + eastClose)
+        val eastCycle = cycles.single { it.batteryId == 5 }
+
+        // The jump was only *detected* by a West event, but it's the same device clock for
+        // both remotes - East's interval, open at the same instant, must be poisoned too.
+        assertFalse(eastCycle.classification == RuntimeClassification.EXACT)
+        assertFalse(eastCycle.includedInPrimaryStatistics)
+    }
+
+    @Test
+    fun `a still-open interval confirmed under a clock anomaly is not presented as a reliable minimum`() {
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val confirmTime = millisAt(2024, 1, 1, 9, 15)
+
+        val install = testBatteryChange(start, RemoteId.WEST, null, 3)
+        val anomalousConfirm = testEvent(
+            timestamp = confirmTime,
+            remoteId = RemoteId.WEST,
+            batteryId = 3,
+            eventType = EventType.STATE_CONFIRMED
+        ).copy(wallClockAnomalyDetected = true)
+
+        val cycles = engine.deriveCycles(install + listOf(anomalousConfirm))
+        val openCycle = cycles.single { it.batteryId == 3 }
+
+        // The confirmation happened, but under a clock known to have jumped - its elapsed
+        // time can't be trusted as a lower bound, so this must not read as reliable.
+        assertEquals(RuntimeClassification.UNKNOWN, openCycle.classification)
+        assertFalse(openCycle.includedInPrimaryStatistics)
+    }
 }

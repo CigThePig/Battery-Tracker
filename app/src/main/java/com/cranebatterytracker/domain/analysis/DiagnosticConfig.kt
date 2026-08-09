@@ -19,5 +19,8 @@ data class DiagnosticConfig(
     val developingExactCycleThreshold: Int = 30,
     val goodExactCycleThreshold: Int = 60,
     val highUnknownRatioThreshold: Double = 0.5,
-    val moderateUnknownRatioThreshold: Double = 0.3
+    val moderateUnknownRatioThreshold: Double = 0.3,
+    val minPeerBatteriesForFleetComparison: Int = 2,
+    val fleetWatchUnderperformanceRatio: Double = 0.85,
+    val fleetStrongUnderperformanceRatio: Double = 0.75
 )

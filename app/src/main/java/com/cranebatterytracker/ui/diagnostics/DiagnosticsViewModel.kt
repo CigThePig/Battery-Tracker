@@ -46,13 +46,7 @@ class DiagnosticsViewModel(private val container: AppContainer) : ViewModel() {
         val deadCounts = container.diagnosticEngine.deadEventCountsByBattery(effective)
         val correctionCount = container.diagnosticEngine.correctionCount(effective)
 
-        val healths = batteries.map { battery ->
-            container.diagnosticEngine.batteryHealth(
-                battery,
-                cyclesByBattery[battery.batteryId] ?: emptyList(),
-                deadCounts[battery.batteryId] ?: 0
-            )
-        }
+        val healths = container.diagnosticEngine.batteryHealths(batteries, cyclesByBattery, deadCounts)
 
         DiagnosticsSnapshot(
             batteries = batteries,
