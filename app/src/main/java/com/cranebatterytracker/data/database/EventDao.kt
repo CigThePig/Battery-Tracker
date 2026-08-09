@@ -7,10 +7,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface EventDao {
-    @Query("SELECT * FROM events ORDER BY timestampEpochMillis, eventId")
+    @Query("SELECT * FROM events ORDER BY sequenceNumber")
     fun observeAll(): Flow<List<EventEntity>>
 
-    @Query("SELECT * FROM events ORDER BY timestampEpochMillis, eventId")
+    @Query("SELECT * FROM events ORDER BY sequenceNumber")
     suspend fun getAll(): List<EventEntity>
 
     @Insert

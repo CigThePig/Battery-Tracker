@@ -22,7 +22,7 @@ class RuntimeAnalysisEngine(
         val batteryId: Int,
         val startTimestamp: Long,
         val startEventId: String,
-        val startHadClockAnomaly: Boolean,
+        var hasClockAnomaly: Boolean,
         var lastConfirmedAt: Long,
         var lastConfirmedEventId: String
     )
@@ -47,7 +47,7 @@ class RuntimeAnalysisEngine(
                             batteryId = newBatteryId,
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
-                            startHadClockAnomaly = event.wallClockAnomalyDetected,
+                            hasClockAnomaly = event.wallClockAnomalyDetected,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
                         )
@@ -70,7 +70,7 @@ class RuntimeAnalysisEngine(
                             batteryId = newBatteryId,
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
-                            startHadClockAnomaly = event.wallClockAnomalyDetected,
+                            hasClockAnomaly = event.wallClockAnomalyDetected,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
                         )
@@ -87,10 +87,25 @@ class RuntimeAnalysisEngine(
                     if (current != null && current.batteryId == event.batteryId) {
                         current.lastConfirmedAt = event.timestampEpochMillis
                         current.lastConfirmedEventId = event.eventId
+                        // A clock anomaly detected on a confirmation *inside* the interval
+                        // must still poison the whole interval - only checking the start
+                        // and end events would miss a jump that happened in between and
+                        // then quietly resolved before the interval closed.
+                        if (event.wallClockAnomalyDetected) current.hasClockAnomaly = true
                     }
                 }
 
                 EventType.UNDO_ACTION, EventType.SYSTEM_TIME_WARNING -> Unit
+            }
+        }
+
+        // Intervals still open when the log ends (the battery is still installed) are not
+        // "completed" cycles, but if they were confirmed at least once, that confirmation
+        // is still a real lower bound on how long the battery has run so far (spec section
+        // 33) and must not be silently dropped just because nothing has closed it yet.
+        for ((openRemoteId, interval) in open) {
+            if (interval.lastConfirmedAt > interval.startTimestamp) {
+                cycles += confirmedMinimum(interval, openRemoteId)
             }
         }
 
@@ -101,9 +116,10 @@ class RuntimeAnalysisEngine(
         val rawDuration = endEvent.timestampEpochMillis - interval.startTimestamp
         val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, endEvent.timestampEpochMillis)
         // Section 31: a reliable install and a reliable removal are necessary but not
-        // sufficient for EXACT - a wall-clock jump on either endpoint means the elapsed
-        // time itself can't be trusted, so such a cycle can be at best SHIFT_INTERRUPTED.
-        val clockAnomaly = interval.startHadClockAnomaly || endEvent.wallClockAnomalyDetected
+        // sufficient for EXACT - a wall-clock jump anywhere in the interval (its start,
+        // its end, or an intermediate confirmation) means the elapsed time itself can't
+        // be trusted, so such a cycle can be at best SHIFT_INTERRUPTED.
+        val clockAnomaly = interval.hasClockAnomaly || endEvent.wallClockAnomalyDetected
         val classification = if (minimum == rawDuration && !clockAnomaly) {
             RuntimeClassification.EXACT
         } else {
@@ -130,22 +146,7 @@ class RuntimeAnalysisEngine(
     private fun closeUncertain(interval: OpenInterval, remoteId: RemoteId): DerivedCycle {
         val hadIntermediateConfirmation = interval.lastConfirmedAt > interval.startTimestamp
         return if (hadIntermediateConfirmation) {
-            val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, interval.lastConfirmedAt)
-            DerivedCycle(
-                cycleId = stableCycleId(interval.startEventId, interval.lastConfirmedEventId),
-                batteryId = interval.batteryId,
-                remoteId = remoteId,
-                startTimestamp = interval.startTimestamp,
-                endTimestamp = interval.lastConfirmedAt,
-                minimumActiveRuntimeMillis = minimum,
-                maximumActiveRuntimeMillis = maximum,
-                classification = RuntimeClassification.CONFIRMED_MINIMUM,
-                isHighOutlier = false,
-                isShortRuntimeEvent = false,
-                includedInPrimaryStatistics = false,
-                startEventId = interval.startEventId,
-                endEventId = interval.lastConfirmedEventId
-            )
+            confirmedMinimum(interval, remoteId)
         } else {
             DerivedCycle(
                 cycleId = stableCycleId(interval.startEventId, null),
@@ -163,6 +164,31 @@ class RuntimeAnalysisEngine(
                 endEventId = null
             )
         }
+    }
+
+    /**
+     * A reliable lower bound on how long [interval]'s battery has run: from its start
+     * to its last confirmation. Used both when a correction/unknown-marking closes an
+     * interval that had at least one confirmation, and for intervals that are still
+     * open when the log ends but were confirmed at least once (spec section 33).
+     */
+    private fun confirmedMinimum(interval: OpenInterval, remoteId: RemoteId): DerivedCycle {
+        val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, interval.lastConfirmedAt)
+        return DerivedCycle(
+            cycleId = stableCycleId(interval.startEventId, interval.lastConfirmedEventId),
+            batteryId = interval.batteryId,
+            remoteId = remoteId,
+            startTimestamp = interval.startTimestamp,
+            endTimestamp = interval.lastConfirmedAt,
+            minimumActiveRuntimeMillis = minimum,
+            maximumActiveRuntimeMillis = maximum,
+            classification = RuntimeClassification.CONFIRMED_MINIMUM,
+            isHighOutlier = false,
+            isShortRuntimeEvent = false,
+            includedInPrimaryStatistics = false,
+            startEventId = interval.startEventId,
+            endEventId = interval.lastConfirmedEventId
+        )
     }
 
     /** Pass 2: flag statistical outliers and short cycles per battery, never touching raw events. */

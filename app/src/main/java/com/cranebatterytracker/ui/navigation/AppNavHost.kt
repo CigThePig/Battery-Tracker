@@ -51,7 +51,12 @@ fun AppNavHost(container: AppContainer, navController: NavHostController = remem
     val currentRoute = currentEntry?.destination?.route
 
     LaunchedEffect(currentRoute) {
-        if (currentRoute == null || currentRoute == Routes.MAIN) return@LaunchedEffect
+        // Only the diagnostics/history/export/settings sub-graph auto-returns to the
+        // tracker after inactivity (spec section 75). The battery picker and correction
+        // screens are the operational flow itself - an operator can be legitimately mid
+        // gesture there for minutes while physically swapping a battery, and must never
+        // be silently kicked back to the main screen mid-action.
+        if (currentRoute == null || !currentRoute.startsWith("diagnostics")) return@LaunchedEffect
         while (true) {
             delay(10_000)
             if (System.currentTimeMillis() - lastInteractionAt >= DIAGNOSTICS_INACTIVITY_TIMEOUT_MILLIS) {

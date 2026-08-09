@@ -52,6 +52,7 @@ fun MainScreen(
                 ShiftStartBanner(
                     westNumber = banner.westBatteryDisplayNumber,
                     eastNumber = banner.eastBatteryDisplayNumber,
+                    enabled = !state.busy,
                     onBothCorrect = viewModel::confirmBothAtShiftStart,
                     onFixWest = { onCorrectState(RemoteId.WEST) },
                     onFixEast = { onCorrectState(RemoteId.EAST) },
@@ -84,10 +85,11 @@ fun MainScreen(
                         .weight(1f)
                         .fillMaxHeight(),
                     compassLabel = "← WEST",
-                    subLabel = state.west?.remote?.shortName?.let { "Front Crane" } ?: "Front Crane",
+                    subLabel = state.west?.remote?.displayName ?: "Front Crane",
                     accentColor = WestAccent,
                     remoteState = state.west?.state,
                     batteryDisplayNumber = state.west?.batteryDisplayNumber,
+                    confirmEnabled = !state.busy,
                     onChangeBattery = { onChangeBattery(RemoteId.WEST) },
                     onConfirmStale = { viewModel.confirmStale(RemoteId.WEST) },
                     onCorrectState = { onCorrectState(RemoteId.WEST) }
@@ -97,10 +99,11 @@ fun MainScreen(
                         .weight(1f)
                         .fillMaxHeight(),
                     compassLabel = "EAST →",
-                    subLabel = "Back Crane",
+                    subLabel = state.east?.remote?.displayName ?: "Back Crane",
                     accentColor = EastAccent,
                     remoteState = state.east?.state,
                     batteryDisplayNumber = state.east?.batteryDisplayNumber,
+                    confirmEnabled = !state.busy,
                     onChangeBattery = { onChangeBattery(RemoteId.EAST) },
                     onConfirmStale = { viewModel.confirmStale(RemoteId.EAST) },
                     onCorrectState = { onCorrectState(RemoteId.EAST) }
@@ -110,6 +113,7 @@ fun MainScreen(
             state.recentActionMessage?.let { message ->
                 RecentActionBar(
                     message = message,
+                    enabled = !state.busy,
                     onUndo = {
                         state.recentActionGroupId?.let { viewModel.undoActionGroup(it) }
                     }
@@ -123,6 +127,7 @@ fun MainScreen(
             ) {
                 OutlinedButton(
                     onClick = viewModel::undoMostRecent,
+                    enabled = !state.busy,
                     modifier = Modifier
                         .weight(1f)
                         .height(52.dp)
@@ -157,6 +162,7 @@ private fun RemoteCard(
     accentColor: androidx.compose.ui.graphics.Color,
     remoteState: RemoteState?,
     batteryDisplayNumber: Int?,
+    confirmEnabled: Boolean,
     onChangeBattery: () -> Unit,
     onConfirmStale: () -> Unit,
     onCorrectState: () -> Unit
@@ -209,7 +215,7 @@ private fun RemoteCard(
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(onClick = onConfirmStale, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = onConfirmStale, enabled = confirmEnabled, modifier = Modifier.fillMaxWidth()) {
                         Text("STILL ${batteryDisplayNumber ?: "?"}")
                     }
                 }
@@ -274,7 +280,7 @@ private fun BatteryNumberDisplay(displayNumber: Int?, onTap: () -> Unit) {
 }
 
 @Composable
-private fun RecentActionBar(message: String, onUndo: () -> Unit) {
+private fun RecentActionBar(message: String, enabled: Boolean, onUndo: () -> Unit) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
@@ -289,7 +295,7 @@ private fun RecentActionBar(message: String, onUndo: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(text = message, style = MaterialTheme.typography.bodyLarge)
-            TextButton(onClick = onUndo) {
+            TextButton(onClick = onUndo, enabled = enabled) {
                 Text("WRONG BUTTON?  UNDO")
             }
         }
@@ -300,6 +306,7 @@ private fun RecentActionBar(message: String, onUndo: () -> Unit) {
 private fun ShiftStartBanner(
     westNumber: Int?,
     eastNumber: Int?,
+    enabled: Boolean,
     onBothCorrect: () -> Unit,
     onFixWest: () -> Unit,
     onFixEast: () -> Unit,
@@ -323,7 +330,7 @@ private fun ShiftStartBanner(
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onBothCorrect, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onBothCorrect, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
                 Text("BOTH STILL CORRECT")
             }
             Spacer(modifier = Modifier.height(4.dp))

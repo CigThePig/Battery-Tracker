@@ -20,12 +20,14 @@ object EventFiltering {
             .toSet()
 
     /**
-     * All non-undo events that were not logically undone, in a stable
-     * chronological order. When two events share a timestamp (a normal
-     * battery change writes its removal and installation at the same
-     * instant), closing/marking events are ordered before opening events so
-     * replay never depends on random UUID tie-breaking - only then does the
-     * event id break remaining ties, purely for reproducibility.
+     * All non-undo events that were not logically undone, in the order they were
+     * actually recorded. This replays by [DomainEvent.sequenceNumber] - the
+     * database's insertion order - rather than [DomainEvent.timestampEpochMillis]:
+     * an operator correcting the tablet's clock backward must never cause older
+     * wall-clock timestamps written later to replay ahead of what was already
+     * recorded (spec section 67). Event id is a last-resort tie-breaker that
+     * should never actually be needed once every persisted event has a unique
+     * sequence number.
      */
     fun effectiveChronologicalEvents(allEvents: List<DomainEvent>): List<DomainEvent> {
         val undoneGroups = undoneActionGroupIds(allEvents)
@@ -33,15 +35,7 @@ object EventFiltering {
             .asSequence()
             .filter { it.eventType != EventType.UNDO_ACTION }
             .filter { it.actionGroupId == null || it.actionGroupId !in undoneGroups }
-            .sortedWith(compareBy({ it.timestampEpochMillis }, { typeOrderingPriority(it.eventType) }, { it.eventId }))
+            .sortedWith(compareBy({ it.sequenceNumber }, { it.eventId }))
             .toList()
-    }
-
-    private fun typeOrderingPriority(eventType: EventType): Int = when (eventType) {
-        EventType.BATTERY_REMOVED_DEAD, EventType.STATE_MARKED_UNKNOWN, EventType.STATE_CORRECTED -> 0
-        EventType.STATE_CONFIRMED -> 1
-        EventType.BATTERY_INSTALLED -> 2
-        EventType.SYSTEM_TIME_WARNING -> 3
-        EventType.UNDO_ACTION -> 4
     }
 }

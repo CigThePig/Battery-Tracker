@@ -130,22 +130,29 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
         val eastWorseCount = comparisons.count { it.eastShorterThanWest(config.minDifferenceMillisForDirectionalMatch) }
         val westWorseCount = comparisons.count { it.westShorterThanEast(config.minDifferenceMillisForDirectionalMatch) }
 
+        // A direction only counts as evidence of a remote-specific effect if it isn't
+        // matched by equally strong evidence pointing the other way - four batteries
+        // could split two-and-two, which is a battery-specific story, not a remote one.
         val (level, message) = when {
-            eastWorseCount >= config.strongWarningBatteryCount ->
+            eastWorseCount > westWorseCount && eastWorseCount >= config.strongWarningBatteryCount ->
                 RemoteWarningLevel.STRONG to
                     "Batteries are consistently lasting less time in the East / Back remote. This pattern appears across multiple batteries. Inspect the East remote or related hardware."
 
-            eastWorseCount >= config.developingWarningBatteryCount ->
-                RemoteWarningLevel.DEVELOPING to
-                    "East currently shows shorter runtime, but more measurements are needed."
-
-            westWorseCount >= config.strongWarningBatteryCount ->
+            westWorseCount > eastWorseCount && westWorseCount >= config.strongWarningBatteryCount ->
                 RemoteWarningLevel.STRONG to
                     "Batteries are consistently lasting less time in the West / Front remote. This pattern appears across multiple batteries. Inspect the West remote or related hardware."
 
-            westWorseCount >= config.developingWarningBatteryCount ->
+            eastWorseCount > westWorseCount && eastWorseCount >= config.developingWarningBatteryCount ->
+                RemoteWarningLevel.DEVELOPING to
+                    "East currently shows shorter runtime, but more measurements are needed."
+
+            westWorseCount > eastWorseCount && westWorseCount >= config.developingWarningBatteryCount ->
                 RemoteWarningLevel.DEVELOPING to
                     "West currently shows shorter runtime, but more measurements are needed."
+
+            eastWorseCount == westWorseCount && eastWorseCount >= config.developingWarningBatteryCount ->
+                RemoteWarningLevel.NONE to
+                    "Evidence points in different directions for different batteries. This looks more like a battery-specific issue than a remote-specific one."
 
             else -> RemoteWarningLevel.NONE to "Not enough data to compare remotes."
         }

@@ -184,4 +184,48 @@ class RuntimeAnalysisEngineTest {
         assertFalse(cycle.classification == RuntimeClassification.EXACT)
         assertFalse(cycle.includedInPrimaryStatistics)
     }
+
+    @Test
+    fun `a clock anomaly on an intermediate confirmation also excludes the cycle from exact statistics`() {
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val confirmTime = millisAt(2024, 1, 1, 8, 0)
+        val end = millisAt(2024, 1, 1, 10, 0)
+
+        val install = testBatteryChange(start, RemoteId.WEST, null, 2)
+        val anomalousConfirmation = testEvent(
+            timestamp = confirmTime,
+            remoteId = RemoteId.WEST,
+            batteryId = 2,
+            eventType = EventType.STATE_CONFIRMED
+        ).copy(wallClockAnomalyDetected = true)
+        val removeAndInstallNext = testBatteryChange(end, RemoteId.WEST, 2, 3)
+
+        val cycle = engine.deriveCycles(install + listOf(anomalousConfirmation) + removeAndInstallNext).single { it.batteryId == 2 }
+        assertFalse(cycle.classification == RuntimeClassification.EXACT)
+        assertFalse(cycle.includedInPrimaryStatistics)
+    }
+
+    @Test
+    fun `a still-open interval that was confirmed produces a confirmed minimum`() {
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val confirmTime = millisAt(2024, 1, 1, 9, 15)
+
+        val install = testBatteryChange(start, RemoteId.WEST, null, 3)
+        val confirm = testEvent(timestamp = confirmTime, remoteId = RemoteId.WEST, batteryId = 3, eventType = EventType.STATE_CONFIRMED)
+
+        val cycles = engine.deriveCycles(install + listOf(confirm))
+        val openCycle = cycles.single { it.batteryId == 3 }
+        assertEquals(RuntimeClassification.CONFIRMED_MINIMUM, openCycle.classification)
+        assertEquals(confirmTime - start, openCycle.minimumActiveRuntimeMillis)
+        assertFalse(openCycle.includedInPrimaryStatistics)
+    }
+
+    @Test
+    fun `a still-open interval with no confirmation produces no cycle at all`() {
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val install = testBatteryChange(start, RemoteId.WEST, null, 3)
+
+        val cycles = engine.deriveCycles(install)
+        assertTrue(cycles.none { it.batteryId == 3 })
+    }
 }

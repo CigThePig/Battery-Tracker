@@ -123,4 +123,48 @@ class EventReducerTest {
 
         assertEquals(first, second)
     }
+
+    @Test
+    fun `a backward clock correction does not reorder events by wall-clock time`() {
+        // Battery 1 installed at 10:00 (real, higher sequence number).
+        val firstInstall = testEvent(
+            sequenceNumber = 1,
+            timestamp = 10_000,
+            remoteId = RemoteId.WEST,
+            batteryId = 1,
+            eventType = EventType.BATTERY_INSTALLED,
+            newBatteryId = 1
+        )
+        // The operator then corrects the tablet's clock backward to 09:00 before the
+        // next real action, so this change is recorded later (sequence 2) but stamped
+        // with an earlier wall-clock timestamp.
+        val groupId = "later-group"
+        val secondChange = listOf(
+            testEvent(
+                sequenceNumber = 2,
+                actionGroupId = groupId,
+                timestamp = 9_000,
+                remoteId = RemoteId.WEST,
+                batteryId = 1,
+                eventType = EventType.BATTERY_REMOVED_DEAD,
+                previousBatteryId = 1
+            ),
+            testEvent(
+                sequenceNumber = 3,
+                actionGroupId = groupId,
+                timestamp = 9_000,
+                remoteId = RemoteId.WEST,
+                batteryId = 2,
+                eventType = EventType.BATTERY_INSTALLED,
+                previousBatteryId = 1,
+                newBatteryId = 2
+            )
+        )
+
+        // Sorting by wall-clock time would replay the 10:00 install last, incorrectly
+        // landing back on Battery 1. Replay must follow the real insertion order instead.
+        val result = EventReducer.reduce(listOf(firstInstall) + secondChange)
+        val known = result.getValue(RemoteId.WEST) as RemoteKnowledge.Known
+        assertEquals(2, known.batteryId)
+    }
 }

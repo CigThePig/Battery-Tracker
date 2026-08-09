@@ -43,26 +43,36 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
     private val localState = MutableStateFlow(LocalUiState())
     private var remotesCache: List<Remote> = emptyList()
 
+    private data class CorrectionData(
+        val events: List<com.cranebatterytracker.domain.model.DomainEvent>,
+        val batteries: List<Battery>,
+        val remotes: List<Remote>,
+        val settings: com.cranebatterytracker.data.settings.AppSettings
+    )
+
     private val dataState = combine(
         container.repository.observeEvents(),
         container.repository.observeBatteries(),
-        container.repository.observeRemotes()
-    ) { events, batteries, remotes -> Triple(events, batteries, remotes) }
+        container.repository.observeRemotes(),
+        container.settingsRepository.settings
+    ) { events, batteries, remotes, settings -> CorrectionData(events, batteries, remotes, settings) }
 
     init {
-        dataState.onEach { (_, _, remotes) -> remotesCache = remotes }.launchIn(viewModelScope)
+        dataState.onEach { remotesCache = it.remotes }.launchIn(viewModelScope)
     }
 
-    val uiState = combine(dataState, localState) { (events, batteries, remotes), local ->
-        val knowledge = EventReducer.reduce(events)
-        val remote = remotes.firstOrNull { it.remoteId == remoteId }
+    val uiState = combine(dataState, localState) { data, local ->
+        val knowledge = EventReducer.reduce(data.events)
+        val remote = data.remotes.firstOrNull { it.remoteId == remoteId }
+        val configuredName = (if (remoteId == RemoteId.WEST) data.settings.westDisplayName else data.settings.eastDisplayName)
+            .ifBlank { null }
         val currentBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
 
         CorrectionUiState(
             loading = false,
-            remoteDisplayName = remote?.displayName ?: "",
-            currentBatteryDisplayNumber = currentBatteryId?.let { id -> batteries.firstOrNull { it.batteryId == id }?.displayNumber },
-            batteries = batteries,
+            remoteDisplayName = configuredName ?: remote?.displayName ?: "",
+            currentBatteryDisplayNumber = currentBatteryId?.let { id -> data.batteries.firstOrNull { it.batteryId == id }?.displayNumber },
+            batteries = data.batteries,
             pendingCollision = local.pendingCollision,
             submitting = local.submitting,
             done = local.done,

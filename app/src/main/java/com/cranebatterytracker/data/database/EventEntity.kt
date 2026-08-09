@@ -11,6 +11,7 @@ import com.cranebatterytracker.domain.model.toStorageKey
 @Entity(
     tableName = "events",
     indices = [
+        Index("eventId", unique = true),
         Index("actionGroupId"),
         Index("timestampEpochMillis"),
         Index("remoteId"),
@@ -19,7 +20,11 @@ import com.cranebatterytracker.domain.model.toStorageKey
     ]
 )
 data class EventEntity(
-    @PrimaryKey val eventId: String,
+    // Auto-generated, strictly increasing insertion order - the authority for replay
+    // order (see DomainEvent.sequenceNumber). eventId remains the stable logical
+    // identity referenced elsewhere (targetActionGroupId, DerivedCycle start/end ids).
+    @PrimaryKey(autoGenerate = true) val sequenceNumber: Long = 0,
+    val eventId: String,
     val actionGroupId: String?,
     val timestampEpochMillis: Long,
     val remoteId: String?,
@@ -36,6 +41,7 @@ data class EventEntity(
 
 fun EventEntity.toDomain(): DomainEvent = DomainEvent(
     eventId = eventId,
+    sequenceNumber = sequenceNumber,
     actionGroupId = actionGroupId,
     timestampEpochMillis = timestampEpochMillis,
     remoteId = remoteId?.let { RemoteId.fromStorageKey(it) },
@@ -50,6 +56,11 @@ fun EventEntity.toDomain(): DomainEvent = DomainEvent(
     notes = notes
 )
 
+/**
+ * [DomainEvent.sequenceNumber] is intentionally dropped here: it must come from Room's
+ * autoGenerate on insert, not be carried over from a domain object that hasn't been
+ * persisted yet. Passing 0 tells Room to assign the next value.
+ */
 fun DomainEvent.toEntity(): EventEntity = EventEntity(
     eventId = eventId,
     actionGroupId = actionGroupId,

@@ -44,31 +44,44 @@ class BatteryPickerViewModel(private val container: AppContainer, private val re
     private val dataState = combine(
         container.repository.observeEvents(),
         container.repository.observeBatteries(),
-        container.repository.observeRemotes()
-    ) { events, batteries, remotes -> Triple(events, batteries, remotes) }
+        container.repository.observeRemotes(),
+        container.settingsRepository.settings
+    ) { events, batteries, remotes, settings -> PickerData(events, batteries, remotes, settings) }
 
-    val uiState = combine(dataState, localState) { (events, batteries, remotes), local ->
-        val knowledge = EventReducer.reduce(events)
-        val remote = remotes.firstOrNull { it.remoteId == remoteId }
+    private data class PickerData(
+        val events: List<com.cranebatterytracker.domain.model.DomainEvent>,
+        val batteries: List<Battery>,
+        val remotes: List<com.cranebatterytracker.domain.model.Remote>,
+        val settings: com.cranebatterytracker.data.settings.AppSettings
+    )
+
+    val uiState = combine(dataState, localState) { data, local ->
+        val knowledge = EventReducer.reduce(data.events)
+        val remote = data.remotes.firstOrNull { it.remoteId == remoteId }
         val otherRemoteId = remoteId.other()
-        val otherRemote = remotes.firstOrNull { it.remoteId == otherRemoteId }
+        val otherRemote = data.remotes.firstOrNull { it.remoteId == otherRemoteId }
         val currentBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
         val otherKnown = knowledge[otherRemoteId] as? RemoteKnowledge.Known
 
         BatteryPickerUiState(
             loading = false,
-            remoteDisplayName = remote?.displayName ?: "",
+            remoteDisplayName = configuredDisplayName(remoteId, data.settings) ?: remote?.displayName ?: "",
             remoteShortName = remote?.shortName ?: "",
-            currentBatteryDisplayNumber = currentBatteryId?.let { id -> batteries.firstOrNull { it.batteryId == id }?.displayNumber },
+            currentBatteryDisplayNumber = currentBatteryId?.let { id -> data.batteries.firstOrNull { it.batteryId == id }?.displayNumber },
             unavailableBatteryId = otherKnown?.batteryId,
-            unavailableBatteryDisplayNumber = otherKnown?.batteryId?.let { id -> batteries.firstOrNull { it.batteryId == id }?.displayNumber },
+            unavailableBatteryDisplayNumber = otherKnown?.batteryId?.let { id -> data.batteries.firstOrNull { it.batteryId == id }?.displayNumber },
             otherRemoteShortName = otherRemote?.shortName,
-            batteries = batteries,
+            batteries = data.batteries,
             saved = local.saved,
             submitting = local.submitting,
             errorMessage = local.errorMessage
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryPickerUiState())
+
+    private fun configuredDisplayName(remoteId: RemoteId, settings: com.cranebatterytracker.data.settings.AppSettings): String? {
+        val name = if (remoteId == RemoteId.WEST) settings.westDisplayName else settings.eastDisplayName
+        return name.ifBlank { null }
+    }
 
     /**
      * A double-tap before the "SAVED" confirmation replaces the grid must not fire a

@@ -7,6 +7,16 @@ package com.cranebatterytracker.domain.model
  */
 data class DomainEvent(
     val eventId: String,
+    /**
+     * A strictly increasing, database-assigned insertion order (Room's
+     * autoGenerate row id). This - not [timestampEpochMillis] - is what
+     * [com.cranebatterytracker.domain.analysis.EventFiltering] replays
+     * events by: wall-clock time can jump backward (an operator corrects
+     * the tablet's clock) without the real order actions happened in ever
+     * changing, and only the insertion sequence is guaranteed monotonic.
+     * Zero for an event that hasn't been persisted yet.
+     */
+    val sequenceNumber: Long = 0,
     val actionGroupId: String?,
     val timestampEpochMillis: Long,
     val remoteId: RemoteId?,

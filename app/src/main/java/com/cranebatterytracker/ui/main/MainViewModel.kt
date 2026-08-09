@@ -40,6 +40,7 @@ data class MainUiState(
     val shiftBanner: ShiftBannerUiState? = null,
     val recentActionMessage: String? = null,
     val recentActionGroupId: String? = null,
+    val busy: Boolean = false,
     val errorMessage: String? = null
 )
 
@@ -51,6 +52,13 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     private val dismissedActionGroupId = MutableStateFlow<String?>(null)
     private val dismissedShiftBannerAt = MutableStateFlow<Long?>(null)
     private val transientError = MutableStateFlow<String?>(null)
+
+    /**
+     * Guards every mutating action (confirm/undo) against a double-tap firing two
+     * independent transactions - e.g. two rapid taps on the permanent Undo control
+     * would otherwise undo two separate action groups instead of one.
+     */
+    private val busy = MutableStateFlow(false)
 
     private val ticker = flow {
         while (true) {
@@ -72,7 +80,12 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         val remotesById = remotes.associateBy(Remote::remoteId)
 
         fun cardFor(remoteId: RemoteId): RemoteCardUiState? {
-            val remote = remotesById[remoteId] ?: return null
+            val seededRemote = remotesById[remoteId] ?: return null
+            // The admin-configurable name in Settings, not the immutable seeded
+            // RemoteEntity row, is the source of truth for what's displayed - otherwise
+            // Settings -> Admin PIN -> remote names has no visible effect anywhere.
+            val configuredName = if (remoteId == RemoteId.WEST) settings.westDisplayName else settings.eastDisplayName
+            val remote = if (configuredName.isNotBlank()) seededRemote.copy(displayName = configuredName) else seededRemote
             val state = shiftEngine.toDisplayState(knowledge.getValue(remoteId), now)
             return RemoteCardUiState(
                 remoteId = remoteId,
@@ -118,30 +131,31 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             shiftBanner = shiftBanner,
             recentActionMessage = recentMessage,
             recentActionGroupId = if (recentMessage != null) recentGroupId else null,
+            busy = busy.value,
             errorMessage = transientError.value
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainUiState())
 
-    fun confirmStale(remoteId: RemoteId) {
+    /** Runs [action] guarded so a double-tap while it's in flight is ignored outright. */
+    private fun runGuarded(action: suspend () -> Unit) {
+        if (busy.value) return
         viewModelScope.launch {
-            runCatching { container.confirmStateUseCase(remoteId, elapsedRealtimeMillis = SystemClock.elapsedRealtime()) }
-                .onFailure { transientError.value = it.message }
+            busy.value = true
+            runCatching { action() }.onFailure { transientError.value = it.message }
+            busy.value = false
         }
     }
 
-    fun undoMostRecent() {
-        viewModelScope.launch {
-            runCatching { container.undoUseCase(elapsedRealtimeMillis = SystemClock.elapsedRealtime()) }
-                .onFailure { transientError.value = it.message }
-        }
+    fun confirmStale(remoteId: RemoteId) = runGuarded {
+        container.confirmStateUseCase(remoteId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
     }
 
-    fun undoActionGroup(actionGroupId: String) {
-        viewModelScope.launch {
-            runCatching {
-                container.undoUseCase(targetActionGroupId = actionGroupId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
-            }.onFailure { transientError.value = it.message }
-        }
+    fun undoMostRecent() = runGuarded {
+        container.undoUseCase(elapsedRealtimeMillis = SystemClock.elapsedRealtime())
+    }
+
+    fun undoActionGroup(actionGroupId: String) = runGuarded {
+        container.undoUseCase(targetActionGroupId = actionGroupId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
     }
 
     fun dismissRecentActionBanner(actionGroupId: String) {
@@ -149,21 +163,26 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun confirmBothAtShiftStart() {
-        viewModelScope.launch {
-            val westKnown = uiState.value.west?.state is RemoteState.Confirmed || uiState.value.west?.state is RemoteState.Stale
-            val eastKnown = uiState.value.east?.state is RemoteState.Confirmed || uiState.value.east?.state is RemoteState.Stale
-            val remotesToConfirm = buildList {
-                if (westKnown) add(RemoteId.WEST)
-                if (eastKnown) add(RemoteId.EAST)
-            }
-            if (remotesToConfirm.isNotEmpty()) {
-                // Both confirmations are written as one action group so the permanent
-                // Undo control reverses this single button press atomically.
-                runCatching {
-                    container.confirmStateUseCase(*remotesToConfirm.toTypedArray(), elapsedRealtimeMillis = SystemClock.elapsedRealtime())
-                }.onFailure { transientError.value = it.message }
-            }
+        val westKnown = uiState.value.west?.state is RemoteState.Confirmed || uiState.value.west?.state is RemoteState.Stale
+        val eastKnown = uiState.value.east?.state is RemoteState.Confirmed || uiState.value.east?.state is RemoteState.Stale
+        val remotesToConfirm = buildList {
+            if (westKnown) add(RemoteId.WEST)
+            if (eastKnown) add(RemoteId.EAST)
+        }
+        if (remotesToConfirm.isEmpty()) {
             dismissedShiftBannerAt.value = System.currentTimeMillis()
+            return
+        }
+        if (busy.value) return
+        viewModelScope.launch {
+            busy.value = true
+            // Both confirmations are written as one action group so the permanent
+            // Undo control reverses this single button press atomically.
+            runCatching {
+                container.confirmStateUseCase(*remotesToConfirm.toTypedArray(), elapsedRealtimeMillis = SystemClock.elapsedRealtime())
+            }.onFailure { transientError.value = it.message }
+            dismissedShiftBannerAt.value = System.currentTimeMillis()
+            busy.value = false
         }
     }
 

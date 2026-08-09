@@ -4,9 +4,14 @@ import com.cranebatterytracker.domain.model.DomainEvent
 import com.cranebatterytracker.domain.model.EventType
 import com.cranebatterytracker.domain.model.RemoteId
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
+
+/** Mimics Room's autoGenerate row id: each call gets the next value, matching construction order. */
+private val sequenceCounter = AtomicLong(1)
 
 fun testEvent(
     eventId: String = UUID.randomUUID().toString(),
+    sequenceNumber: Long = sequenceCounter.getAndIncrement(),
     actionGroupId: String? = UUID.randomUUID().toString(),
     timestamp: Long,
     remoteId: RemoteId? = null,
@@ -17,6 +22,7 @@ fun testEvent(
     targetActionGroupId: String? = null
 ): DomainEvent = DomainEvent(
     eventId = eventId,
+    sequenceNumber = sequenceNumber,
     actionGroupId = actionGroupId,
     timestampEpochMillis = timestamp,
     remoteId = remoteId,

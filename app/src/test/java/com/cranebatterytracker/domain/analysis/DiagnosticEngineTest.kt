@@ -106,4 +106,26 @@ class DiagnosticEngineTest {
         val summary = engine.remoteDiagnostics(batteries, cyclesByBattery)
         assertTrue(summary.warningLevel != RemoteWarningLevel.STRONG)
     }
+
+    @Test
+    fun `tied conflicting directional evidence is treated as inconclusive, not a directional warning`() {
+        val batteries = (1..4).map(::battery)
+        // Batteries 1-2 run shorter in East; batteries 3-4 run shorter in West - equally
+        // strong evidence in both directions, so neither should win.
+        val cyclesByBattery = batteries.associate { b ->
+            val westDuration = if (b.batteryId in listOf(3, 4)) 3 * 3_600_000L else 5 * 3_600_000L
+            val eastDuration = if (b.batteryId in listOf(1, 2)) 3 * 3_600_000L else 5 * 3_600_000L
+            val cycles = (0 until 3).flatMap { i ->
+                listOf(
+                    exactCycle(b.batteryId, RemoteId.WEST, westDuration, i * 1_000_000L),
+                    exactCycle(b.batteryId, RemoteId.EAST, eastDuration, i * 1_000_000L + 500_000L)
+                )
+            }
+            b.batteryId to cycles
+        }
+
+        val summary = engine.remoteDiagnostics(batteries, cyclesByBattery)
+        assertEquals(RemoteWarningLevel.NONE, summary.warningLevel)
+        assertTrue(summary.message.contains("battery-specific", ignoreCase = true))
+    }
 }
