@@ -30,6 +30,7 @@ data class EventEntity(
     val targetActionGroupId: String?,
     val createdByAppVersion: String,
     val wallClockAnomalyDetected: Boolean,
+    val elapsedRealtimeMillis: Long?,
     val notes: String?
 )
 
@@ -45,6 +46,7 @@ fun EventEntity.toDomain(): DomainEvent = DomainEvent(
     targetActionGroupId = targetActionGroupId,
     createdByAppVersion = createdByAppVersion,
     wallClockAnomalyDetected = wallClockAnomalyDetected,
+    elapsedRealtimeMillis = elapsedRealtimeMillis,
     notes = notes
 )
 
@@ -60,5 +62,6 @@ fun DomainEvent.toEntity(): EventEntity = EventEntity(
     targetActionGroupId = targetActionGroupId,
     createdByAppVersion = createdByAppVersion,
     wallClockAnomalyDetected = wallClockAnomalyDetected,
+    elapsedRealtimeMillis = elapsedRealtimeMillis,
     notes = notes
 )

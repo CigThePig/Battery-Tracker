@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.cranebatterytracker.ui.common.ErrorBanner
 
 @Composable
 fun CorrectionScreen(
@@ -74,6 +75,10 @@ fun CorrectionScreen(
                     .padding(top = 16.dp)
             )
 
+            state.errorMessage?.let { message ->
+                ErrorBanner(message = message, onDismiss = viewModel::consumeError, modifier = Modifier.padding(top = 8.dp))
+            }
+
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 modifier = Modifier
@@ -88,6 +93,7 @@ fun CorrectionScreen(
                     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
                         Button(
                             onClick = { viewModel.selectBattery(battery.batteryId) },
+                            enabled = !state.submitting,
                             modifier = Modifier.fillMaxSize()
                         ) {
                             Text(text = battery.displayNumber.toString(), style = MaterialTheme.typography.headlineLarge)
@@ -98,6 +104,7 @@ fun CorrectionScreen(
 
             OutlinedButton(
                 onClick = viewModel::markUnknown,
+                enabled = !state.submitting,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)

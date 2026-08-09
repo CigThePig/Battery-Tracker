@@ -1,5 +1,6 @@
 package com.cranebatterytracker.ui.main
 
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cranebatterytracker.di.AppContainer
@@ -123,22 +124,23 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     fun confirmStale(remoteId: RemoteId) {
         viewModelScope.launch {
-            runCatching { container.confirmStateUseCase(remoteId) }
+            runCatching { container.confirmStateUseCase(remoteId, elapsedRealtimeMillis = SystemClock.elapsedRealtime()) }
                 .onFailure { transientError.value = it.message }
         }
     }
 
     fun undoMostRecent() {
         viewModelScope.launch {
-            runCatching { container.undoUseCase() }
+            runCatching { container.undoUseCase(elapsedRealtimeMillis = SystemClock.elapsedRealtime()) }
                 .onFailure { transientError.value = it.message }
         }
     }
 
     fun undoActionGroup(actionGroupId: String) {
         viewModelScope.launch {
-            runCatching { container.undoUseCase(targetActionGroupId = actionGroupId) }
-                .onFailure { transientError.value = it.message }
+            runCatching {
+                container.undoUseCase(targetActionGroupId = actionGroupId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
+            }.onFailure { transientError.value = it.message }
         }
     }
 
@@ -150,8 +152,17 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val westKnown = uiState.value.west?.state is RemoteState.Confirmed || uiState.value.west?.state is RemoteState.Stale
             val eastKnown = uiState.value.east?.state is RemoteState.Confirmed || uiState.value.east?.state is RemoteState.Stale
-            if (westKnown) runCatching { container.confirmStateUseCase(RemoteId.WEST) }
-            if (eastKnown) runCatching { container.confirmStateUseCase(RemoteId.EAST) }
+            val remotesToConfirm = buildList {
+                if (westKnown) add(RemoteId.WEST)
+                if (eastKnown) add(RemoteId.EAST)
+            }
+            if (remotesToConfirm.isNotEmpty()) {
+                // Both confirmations are written as one action group so the permanent
+                // Undo control reverses this single button press atomically.
+                runCatching {
+                    container.confirmStateUseCase(*remotesToConfirm.toTypedArray(), elapsedRealtimeMillis = SystemClock.elapsedRealtime())
+                }.onFailure { transientError.value = it.message }
+            }
             dismissedShiftBannerAt.value = System.currentTimeMillis()
         }
     }

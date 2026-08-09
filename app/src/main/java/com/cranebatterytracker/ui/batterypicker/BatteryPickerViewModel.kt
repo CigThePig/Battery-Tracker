@@ -1,5 +1,6 @@
 package com.cranebatterytracker.ui.batterypicker
 
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cranebatterytracker.di.AppContainer
@@ -26,21 +27,27 @@ data class BatteryPickerUiState(
     val otherRemoteShortName: String? = null,
     val batteries: List<Battery> = emptyList(),
     val saved: SavedResult? = null,
+    val submitting: Boolean = false,
+    val errorMessage: String? = null
+)
+
+private data class LocalUiState(
+    val saved: SavedResult? = null,
+    val submitting: Boolean = false,
     val errorMessage: String? = null
 )
 
 class BatteryPickerViewModel(private val container: AppContainer, private val remoteId: RemoteId) : ViewModel() {
 
-    private val savedResult = MutableStateFlow<SavedResult?>(null)
-    private val errorMessage = MutableStateFlow<String?>(null)
+    private val localState = MutableStateFlow(LocalUiState())
 
-    val uiState = combine(
+    private val dataState = combine(
         container.repository.observeEvents(),
         container.repository.observeBatteries(),
-        container.repository.observeRemotes(),
-        savedResult,
-        errorMessage
-    ) { events, batteries, remotes, saved, error ->
+        container.repository.observeRemotes()
+    ) { events, batteries, remotes -> Triple(events, batteries, remotes) }
+
+    val uiState = combine(dataState, localState) { (events, batteries, remotes), local ->
         val knowledge = EventReducer.reduce(events)
         val remote = remotes.firstOrNull { it.remoteId == remoteId }
         val otherRemoteId = remoteId.other()
@@ -57,28 +64,43 @@ class BatteryPickerViewModel(private val container: AppContainer, private val re
             unavailableBatteryDisplayNumber = otherKnown?.batteryId?.let { id -> batteries.firstOrNull { it.batteryId == id }?.displayNumber },
             otherRemoteShortName = otherRemote?.shortName,
             batteries = batteries,
-            saved = saved,
-            errorMessage = error
+            saved = local.saved,
+            submitting = local.submitting,
+            errorMessage = local.errorMessage
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BatteryPickerUiState())
 
+    /**
+     * A double-tap before the "SAVED" confirmation replaces the grid must not fire a
+     * second transaction - that would remove and reinstall the just-selected battery,
+     * corrupting its dead-event count and creating a spurious near-zero cycle.
+     */
     fun selectBattery(batteryId: Int) {
+        if (localState.value.submitting) return
         viewModelScope.launch {
+            localState.value = localState.value.copy(submitting = true)
             val snapshot = uiState.value
-            runCatching { container.batteryChangeUseCase(remoteId, batteryId) }
+            runCatching {
+                container.batteryChangeUseCase(remoteId, batteryId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
+            }
                 .onSuccess {
                     val toNumber = snapshot.batteries.firstOrNull { it.batteryId == batteryId }?.displayNumber ?: batteryId
-                    savedResult.value = SavedResult(snapshot.currentBatteryDisplayNumber, toNumber)
+                    localState.value = localState.value.copy(
+                        submitting = false,
+                        saved = SavedResult(snapshot.currentBatteryDisplayNumber, toNumber)
+                    )
                 }
-                .onFailure { errorMessage.value = it.message }
+                .onFailure { error ->
+                    localState.value = localState.value.copy(submitting = false, errorMessage = error.message)
+                }
         }
     }
 
     fun consumeSaved() {
-        savedResult.value = null
+        localState.value = localState.value.copy(saved = null)
     }
 
     fun consumeError() {
-        errorMessage.value = null
+        localState.value = localState.value.copy(errorMessage = null)
     }
 }

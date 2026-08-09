@@ -1,5 +1,6 @@
 package com.cranebatterytracker.domain.usecase
 
+import com.cranebatterytracker.domain.analysis.ClockAnomalyDetector
 import com.cranebatterytracker.domain.analysis.EventReducer
 import com.cranebatterytracker.domain.model.DomainEvent
 import com.cranebatterytracker.domain.model.EventType
@@ -25,10 +26,44 @@ class CorrectStateUseCase(
         remoteId: RemoteId,
         newBatteryId: Int,
         now: Long = System.currentTimeMillis(),
+        elapsedRealtimeMillis: Long = now,
         resolveCollision: Boolean = false
     ) {
         repository.inTransaction {
-            val knowledge = EventReducer.reduce(repository.currentEventsSnapshot())
+            val priorEvents = repository.currentEventsSnapshot()
+            val knowledge = EventReducer.reduce(priorEvents)
+            val previousBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
+            val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
+
+            if (previousBatteryId == newBatteryId) {
+                // The operator is confirming the battery the tablet already shows here,
+                // not correcting it. Treating this as STATE_CORRECTED would discard an
+                // otherwise trustworthy open interval for no reason - refresh confidence
+                // instead, exactly like ConfirmStateUseCase.
+                val groupId = UUID.randomUUID().toString()
+                repository.writeEventGroup(
+                    buildList {
+                        add(
+                            DomainEvent(
+                                eventId = UUID.randomUUID().toString(),
+                                actionGroupId = groupId,
+                                timestampEpochMillis = now,
+                                remoteId = remoteId,
+                                batteryId = newBatteryId,
+                                eventType = EventType.STATE_CONFIRMED,
+                                previousBatteryId = newBatteryId,
+                                newBatteryId = newBatteryId,
+                                targetActionGroupId = null,
+                                createdByAppVersion = appVersion,
+                                wallClockAnomalyDetected = anomalyDetected,
+                                elapsedRealtimeMillis = elapsedRealtimeMillis
+                            )
+                        )
+                        if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                    }
+                )
+                return@inTransaction
+            }
 
             val otherRemote = remoteId.other()
             val otherKnowledge = knowledge[otherRemote]
@@ -37,7 +72,6 @@ class CorrectStateUseCase(
                 throw BatteryTrackerException.BatteryOwnedByOtherRemote(otherRemote, newBatteryId)
             }
 
-            val previousBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
             val groupId = UUID.randomUUID().toString()
 
             val events = buildList {
@@ -53,7 +87,8 @@ class CorrectStateUseCase(
                         newBatteryId = newBatteryId,
                         targetActionGroupId = null,
                         createdByAppVersion = appVersion,
-                        wallClockAnomalyDetected = false
+                        wallClockAnomalyDetected = anomalyDetected,
+                        elapsedRealtimeMillis = elapsedRealtimeMillis
                     )
                 )
                 if (collision) {
@@ -69,10 +104,12 @@ class CorrectStateUseCase(
                             newBatteryId = null,
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
-                            wallClockAnomalyDetected = false
+                            wallClockAnomalyDetected = anomalyDetected,
+                            elapsedRealtimeMillis = elapsedRealtimeMillis
                         )
                     )
                 }
+                if (anomalyDetected) add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
             }
 
             repository.writeEventGroup(events)

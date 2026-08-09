@@ -1,5 +1,6 @@
 package com.cranebatterytracker.ui.correction
 
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cranebatterytracker.di.AppContainer
@@ -25,12 +26,14 @@ data class CorrectionUiState(
     val currentBatteryDisplayNumber: Int? = null,
     val batteries: List<Battery> = emptyList(),
     val pendingCollision: CollisionPrompt? = null,
+    val submitting: Boolean = false,
     val done: Boolean = false,
     val errorMessage: String? = null
 )
 
 private data class LocalUiState(
     val pendingCollision: CollisionPrompt? = null,
+    val submitting: Boolean = false,
     val done: Boolean = false,
     val errorMessage: String? = null
 )
@@ -61,20 +64,26 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
             currentBatteryDisplayNumber = currentBatteryId?.let { id -> batteries.firstOrNull { it.batteryId == id }?.displayNumber },
             batteries = batteries,
             pendingCollision = local.pendingCollision,
+            submitting = local.submitting,
             done = local.done,
             errorMessage = local.errorMessage
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CorrectionUiState())
 
     fun selectBattery(batteryId: Int) {
+        if (localState.value.submitting) return
         viewModelScope.launch {
-            runCatching { container.correctStateUseCase(remoteId, batteryId) }
-                .onSuccess { localState.value = localState.value.copy(done = true) }
+            localState.value = localState.value.copy(submitting = true)
+            runCatching {
+                container.correctStateUseCase(remoteId, batteryId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
+            }
+                .onSuccess { localState.value = localState.value.copy(submitting = false, done = true) }
                 .onFailure { error ->
                     if (error is BatteryTrackerException.BatteryOwnedByOtherRemote) {
                         val otherShortName = remotesCache.firstOrNull { it.remoteId == error.otherRemote }?.shortName
                             ?: error.otherRemote.name
                         localState.value = localState.value.copy(
+                            submitting = false,
                             pendingCollision = CollisionPrompt(
                                 batteryId = batteryId,
                                 batteryDisplayNumber = error.batteryDisplayNumber,
@@ -82,7 +91,7 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
                             )
                         )
                     } else {
-                        localState.value = localState.value.copy(errorMessage = error.message)
+                        localState.value = localState.value.copy(submitting = false, errorMessage = error.message)
                     }
                 }
         }
@@ -90,10 +99,19 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
 
     fun confirmCollision() {
         val prompt = localState.value.pendingCollision ?: return
+        if (localState.value.submitting) return
         viewModelScope.launch {
-            runCatching { container.correctStateUseCase(remoteId, prompt.batteryId, resolveCollision = true) }
-                .onSuccess { localState.value = localState.value.copy(pendingCollision = null, done = true) }
-                .onFailure { localState.value = localState.value.copy(errorMessage = it.message) }
+            localState.value = localState.value.copy(submitting = true)
+            runCatching {
+                container.correctStateUseCase(
+                    remoteId,
+                    prompt.batteryId,
+                    elapsedRealtimeMillis = SystemClock.elapsedRealtime(),
+                    resolveCollision = true
+                )
+            }
+                .onSuccess { localState.value = localState.value.copy(submitting = false, pendingCollision = null, done = true) }
+                .onFailure { localState.value = localState.value.copy(submitting = false, errorMessage = it.message) }
         }
     }
 
@@ -102,10 +120,14 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
     }
 
     fun markUnknown() {
+        if (localState.value.submitting) return
         viewModelScope.launch {
-            runCatching { container.markUnknownUseCase(remoteId) }
-                .onSuccess { localState.value = localState.value.copy(done = true) }
-                .onFailure { localState.value = localState.value.copy(errorMessage = it.message) }
+            localState.value = localState.value.copy(submitting = true)
+            runCatching {
+                container.markUnknownUseCase(remoteId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
+            }
+                .onSuccess { localState.value = localState.value.copy(submitting = false, done = true) }
+                .onFailure { localState.value = localState.value.copy(submitting = false, errorMessage = it.message) }
         }
     }
 

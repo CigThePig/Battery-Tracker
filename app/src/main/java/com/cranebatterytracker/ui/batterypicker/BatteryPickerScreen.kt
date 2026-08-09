@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.cranebatterytracker.ui.common.ErrorBanner
 import com.cranebatterytracker.ui.theme.StatusUnknown
 import kotlinx.coroutines.delay
 
@@ -77,6 +78,10 @@ fun BatteryPickerScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            state.errorMessage?.let { message ->
+                ErrorBanner(message = message, onDismiss = viewModel::consumeError, modifier = Modifier.padding(top = 8.dp))
+            }
+
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 modifier = Modifier
@@ -92,6 +97,7 @@ fun BatteryPickerScreen(
                     BatteryGridButton(
                         number = battery.displayNumber,
                         unavailableInRemote = if (unavailable) state.otherRemoteShortName else null,
+                        enabled = !state.submitting,
                         onClick = { if (!unavailable) viewModel.selectBattery(battery.batteryId) }
                     )
                 }
@@ -110,16 +116,16 @@ fun BatteryPickerScreen(
 }
 
 @Composable
-private fun BatteryGridButton(number: Int, unavailableInRemote: String?, onClick: () -> Unit) {
-    val enabled = unavailableInRemote == null
+private fun BatteryGridButton(number: Int, unavailableInRemote: String?, enabled: Boolean, onClick: () -> Unit) {
+    val selectable = enabled && unavailableInRemote == null
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = if (enabled) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
+        color = if (selectable) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxSize()
     ) {
         Button(
             onClick = onClick,
-            enabled = enabled,
+            enabled = selectable,
             modifier = Modifier.fillMaxSize(),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,

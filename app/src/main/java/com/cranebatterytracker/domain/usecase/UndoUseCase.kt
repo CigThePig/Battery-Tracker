@@ -16,7 +16,11 @@ class UndoUseCase(
     private val appVersion: String
 ) {
     /** Pass [targetActionGroupId] to undo a specific just-shown action; omit to undo the most recent one. */
-    suspend operator fun invoke(targetActionGroupId: String? = null, now: Long = System.currentTimeMillis()) {
+    suspend operator fun invoke(
+        targetActionGroupId: String? = null,
+        now: Long = System.currentTimeMillis(),
+        elapsedRealtimeMillis: Long = now
+    ) {
         repository.inTransaction {
             val allEvents = repository.currentEventsSnapshot()
             val undoneGroups = EventFiltering.undoneActionGroupIds(allEvents)
@@ -42,7 +46,8 @@ class UndoUseCase(
                         newBatteryId = null,
                         targetActionGroupId = target,
                         createdByAppVersion = appVersion,
-                        wallClockAnomalyDetected = false
+                        wallClockAnomalyDetected = false,
+                        elapsedRealtimeMillis = elapsedRealtimeMillis
                     )
                 )
             )

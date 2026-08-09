@@ -1,5 +1,6 @@
 package com.cranebatterytracker.domain.usecase
 
+import com.cranebatterytracker.domain.analysis.ClockAnomalyDetector
 import com.cranebatterytracker.domain.analysis.EventReducer
 import com.cranebatterytracker.domain.model.DomainEvent
 import com.cranebatterytracker.domain.model.EventType
@@ -18,9 +19,21 @@ class BatteryChangeUseCase(
     private val repository: BatteryTrackerRepository,
     private val appVersion: String
 ) {
-    suspend operator fun invoke(remoteId: RemoteId, newBatteryId: Int, now: Long = System.currentTimeMillis()) {
+    /**
+     * [elapsedRealtimeMillis] should be the device's monotonic clock (e.g.
+     * SystemClock.elapsedRealtime()) at the same moment as [now]; defaulting
+     * it to [now] simply disables anomaly detection for callers that don't
+     * have a monotonic reading available (such as tests).
+     */
+    suspend operator fun invoke(
+        remoteId: RemoteId,
+        newBatteryId: Int,
+        now: Long = System.currentTimeMillis(),
+        elapsedRealtimeMillis: Long = now
+    ) {
         repository.inTransaction {
-            val knowledge = EventReducer.reduce(repository.currentEventsSnapshot())
+            val priorEvents = repository.currentEventsSnapshot()
+            val knowledge = EventReducer.reduce(priorEvents)
 
             val otherRemote = remoteId.other()
             val otherKnowledge = knowledge[otherRemote]
@@ -28,6 +41,7 @@ class BatteryChangeUseCase(
                 throw BatteryTrackerException.BatteryOwnedByOtherRemote(otherRemote, newBatteryId)
             }
 
+            val anomalyDetected = ClockAnomalyDetector.detect(priorEvents, now, elapsedRealtimeMillis)
             val currentBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
             val groupId = UUID.randomUUID().toString()
             val events = buildList {
@@ -44,7 +58,8 @@ class BatteryChangeUseCase(
                             newBatteryId = null,
                             targetActionGroupId = null,
                             createdByAppVersion = appVersion,
-                            wallClockAnomalyDetected = false
+                            wallClockAnomalyDetected = anomalyDetected,
+                            elapsedRealtimeMillis = elapsedRealtimeMillis
                         )
                     )
                 }
@@ -60,9 +75,13 @@ class BatteryChangeUseCase(
                         newBatteryId = newBatteryId,
                         targetActionGroupId = null,
                         createdByAppVersion = appVersion,
-                        wallClockAnomalyDetected = false
+                        wallClockAnomalyDetected = anomalyDetected,
+                        elapsedRealtimeMillis = elapsedRealtimeMillis
                     )
                 )
+                if (anomalyDetected) {
+                    add(systemTimeWarningEvent(remoteId, groupId, now, appVersion))
+                }
             }
 
             repository.writeEventGroup(events)

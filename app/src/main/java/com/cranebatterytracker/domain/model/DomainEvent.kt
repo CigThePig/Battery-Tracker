@@ -17,5 +17,14 @@ data class DomainEvent(
     val targetActionGroupId: String?,
     val createdByAppVersion: String,
     val wallClockAnomalyDetected: Boolean,
+    /**
+     * Device monotonic clock reading (e.g. SystemClock.elapsedRealtime())
+     * at the moment this event was recorded, alongside [timestampEpochMillis].
+     * Comparing how these two clocks drift between consecutive events is
+     * what lets [com.cranebatterytracker.domain.analysis.ClockAnomalyDetector]
+     * notice a wall-clock jump instead of trusting elapsed wall-clock time
+     * blindly (spec section 67). Null when no monotonic reading is available.
+     */
+    val elapsedRealtimeMillis: Long? = null,
     val notes: String? = null
 )

@@ -3,11 +3,14 @@ package com.cranebatterytracker.domain.usecase
 import com.cranebatterytracker.domain.analysis.EventReducer
 import com.cranebatterytracker.domain.analysis.RuntimeAnalysisEngine
 import com.cranebatterytracker.domain.analysis.ShiftEngine
+import com.cranebatterytracker.domain.analysis.ShiftSchedule
 import com.cranebatterytracker.domain.model.EventType
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.domain.model.RemoteKnowledge
 import com.cranebatterytracker.domain.model.RuntimeClassification
 import com.cranebatterytracker.testutil.FakeBatteryTrackerRepository
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,5 +61,44 @@ class CorrectStateUseCaseTest {
         val batteryTwoCycle = cycles.single { it.batteryId == 2 }
         assertFalse(batteryTwoCycle.classification == RuntimeClassification.EXACT)
         assertFalse(batteryTwoCycle.includedInPrimaryStatistics)
+    }
+
+    @Test
+    fun `correcting to the already-displayed battery confirms instead of correcting`() = runTest {
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+        val correctUseCase = CorrectStateUseCase(repository, "test")
+
+        changeUseCase(RemoteId.WEST, 2, now = 1_000)
+        correctUseCase(RemoteId.WEST, newBatteryId = 2, now = 20_000)
+
+        assertFalse(repository.allEvents().any { it.eventType == EventType.STATE_CORRECTED })
+        assertTrue(repository.allEvents().any { it.eventType == EventType.STATE_CONFIRMED })
+    }
+
+    @Test
+    fun `confirming the same battery preserves the open interval for exact statistics`() = runTest {
+        val zone = ZoneOffset.UTC
+        fun millisAt(hour: Int, minute: Int) =
+            ZonedDateTime.of(2024, 1, 1, hour, minute, 0, 0, zone).toInstant().toEpochMilli()
+
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+        val correctUseCase = CorrectStateUseCase(repository, "test")
+
+        val installTime = millisAt(6, 0)
+        val confirmTime = millisAt(8, 0)
+        val removeTime = millisAt(10, 0)
+
+        changeUseCase(RemoteId.WEST, 2, now = installTime)
+        correctUseCase(RemoteId.WEST, newBatteryId = 2, now = confirmTime)
+        changeUseCase(RemoteId.WEST, 3, now = removeTime)
+
+        val engine = RuntimeAnalysisEngine(ShiftEngine(ShiftSchedule(), zone))
+        val cycles = engine.deriveCycles(repository.allEvents())
+        val batteryTwoCycle = cycles.single { it.batteryId == 2 }
+        assertEquals(RuntimeClassification.EXACT, batteryTwoCycle.classification)
+        assertEquals(installTime, batteryTwoCycle.startTimestamp)
+        assertEquals(removeTime - installTime, batteryTwoCycle.minimumActiveRuntimeMillis)
     }
 }

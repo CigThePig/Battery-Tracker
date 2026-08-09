@@ -157,4 +157,31 @@ class RuntimeAnalysisEngineTest {
         assertTrue(shortCycle.isShortRuntimeEvent)
         assertTrue(shortCycle.includedInPrimaryStatistics)
     }
+
+    @Test
+    fun `re-deriving the same event log produces the same cycle ids`() {
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val end = millisAt(2024, 1, 1, 10, 0)
+        val events = testBatteryChange(start, RemoteId.WEST, null, 2) +
+            testBatteryChange(end, RemoteId.WEST, 2, 3)
+
+        val first = engine.deriveCycles(events).single { it.batteryId == 2 }
+        val second = engine.deriveCycles(events).single { it.batteryId == 2 }
+
+        assertEquals(first.cycleId, second.cycleId)
+    }
+
+    @Test
+    fun `a clock anomaly on either endpoint excludes the cycle from exact statistics`() {
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val end = millisAt(2024, 1, 1, 10, 0)
+        val installEvent = testBatteryChange(start, RemoteId.WEST, null, 2).map {
+            if (it.eventType == EventType.BATTERY_INSTALLED) it.copy(wallClockAnomalyDetected = true) else it
+        }
+        val events = installEvent + testBatteryChange(end, RemoteId.WEST, 2, 3)
+
+        val cycle = engine.deriveCycles(events).single { it.batteryId == 2 }
+        assertFalse(cycle.classification == RuntimeClassification.EXACT)
+        assertFalse(cycle.includedInPrimaryStatistics)
+    }
 }

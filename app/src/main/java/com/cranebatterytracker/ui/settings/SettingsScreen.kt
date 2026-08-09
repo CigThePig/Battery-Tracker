@@ -30,13 +30,28 @@ import java.time.LocalTime
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
     val settings by viewModel.settings.collectAsState()
-    var unlocked by remember(settings.adminPin) { mutableStateOf(settings.adminPin.isNullOrBlank()) }
+    val loadedSettings = settings
+
+    // Settings are null until DataStore's real, persisted value has loaded. Treating that
+    // gap as "unprotected" would let PIN-gated controls flash open before we actually know
+    // whether a PIN is configured, so show a loading state and gate nothing until it arrives.
+    if (loadedSettings == null) {
+        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                TextButton(onClick = onBack) { Text("← Back") }
+                Text(text = "Loading settings…", style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+        return
+    }
+
+    var unlocked by remember(loadedSettings.adminPin) { mutableStateOf(loadedSettings.adminPin.isNullOrBlank()) }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (!unlocked) {
-            PinGate(onUnlock = { entered -> if (entered == settings.adminPin) unlocked = true }, onBack = onBack)
+            PinGate(onUnlock = { entered -> if (entered == loadedSettings.adminPin) unlocked = true }, onBack = onBack)
         } else {
-            SettingsContent(settings = settings, viewModel = viewModel, onBack = onBack)
+            SettingsContent(settings = loadedSettings, viewModel = viewModel, onBack = onBack)
         }
     }
 }
@@ -92,15 +107,26 @@ private fun SettingsContent(settings: AppSettings, viewModel: SettingsViewModel,
             Button(
                 onClick = {
                     runCatching {
-                        viewModel.updateShiftTimes(
-                            LocalTime.parse(dayStart),
-                            LocalTime.parse(dayAmbiguousStart),
-                            LocalTime.parse(dayAmbiguousEnd),
-                            LocalTime.parse(nightStart),
-                            LocalTime.parse(nightAmbiguousStart),
-                            LocalTime.parse(nightAmbiguousEnd)
+                        val parsedDayStart = LocalTime.parse(dayStart)
+                        val parsedDayAmbiguousStart = LocalTime.parse(dayAmbiguousStart)
+                        val parsedDayAmbiguousEnd = LocalTime.parse(dayAmbiguousEnd)
+                        val parsedNightStart = LocalTime.parse(nightStart)
+                        val parsedNightAmbiguousStart = LocalTime.parse(nightAmbiguousStart)
+                        val parsedNightAmbiguousEnd = LocalTime.parse(nightAmbiguousEnd)
+
+                        val orderingError = validateShiftOrdering(
+                            parsedDayStart, parsedDayAmbiguousStart, parsedDayAmbiguousEnd,
+                            parsedNightStart, parsedNightAmbiguousStart, parsedNightAmbiguousEnd
                         )
-                        shiftError = null
+                        if (orderingError != null) {
+                            shiftError = orderingError
+                        } else {
+                            viewModel.updateShiftTimes(
+                                parsedDayStart, parsedDayAmbiguousStart, parsedDayAmbiguousEnd,
+                                parsedNightStart, parsedNightAmbiguousStart, parsedNightAmbiguousEnd
+                            )
+                            shiftError = null
+                        }
                     }.onFailure { shiftError = "Times must look like 05:00" }
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -144,6 +170,29 @@ private fun SettingsContent(settings: AppSettings, viewModel: SettingsViewModel,
             }
         }
     }
+}
+
+/**
+ * Mirrors the window ordering [com.cranebatterytracker.domain.analysis.ShiftEngine]
+ * actually builds: the day window's four boundaries must strictly increase within the
+ * day, and the night window's ambiguous boundaries must strictly increase and land
+ * before the following day start. Rejecting anything else here prevents saving a
+ * schedule that would silently produce reversed or overlapping active windows.
+ */
+private fun validateShiftOrdering(
+    dayStart: LocalTime,
+    dayAmbiguousStart: LocalTime,
+    dayAmbiguousEnd: LocalTime,
+    nightStart: LocalTime,
+    nightAmbiguousStart: LocalTime,
+    nightAmbiguousEnd: LocalTime
+): String? = when {
+    !dayStart.isBefore(dayAmbiguousStart) -> "Day start must be before the day ambiguous window starts."
+    !dayAmbiguousStart.isBefore(dayAmbiguousEnd) -> "Day ambiguous start must be before day ambiguous end."
+    !dayAmbiguousEnd.isBefore(nightStart) -> "Day ambiguous end must be before night start."
+    !nightAmbiguousStart.isBefore(nightAmbiguousEnd) -> "Night ambiguous start must be before night ambiguous end."
+    !nightAmbiguousEnd.isBefore(dayStart) -> "Night ambiguous end must be before the next day start."
+    else -> null
 }
 
 @Composable

@@ -12,8 +12,14 @@ import kotlinx.coroutines.launch
 
 class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
+    /**
+     * Null until the real persisted settings have loaded from DataStore. The screen
+     * must treat that as "locked/loading", never as "no PIN is set" - defaulting to
+     * an unprotected [AppSettings] here would open a startup window where PIN-gated
+     * controls are usable before we actually know whether a PIN is configured.
+     */
     val settings = container.settingsRepository.settings
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun updateShiftTimes(
         dayStart: LocalTime,

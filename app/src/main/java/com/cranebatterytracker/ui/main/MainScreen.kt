@@ -29,6 +29,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.domain.model.RemoteState
+import com.cranebatterytracker.ui.common.ErrorBanner
 import com.cranebatterytracker.ui.common.formatSinceLabel
 import com.cranebatterytracker.ui.theme.BatteryNumberStyle
 import com.cranebatterytracker.ui.theme.EastAccent
@@ -56,6 +57,10 @@ fun MainScreen(
                     onFixEast = { onCorrectState(RemoteId.EAST) },
                     onDismiss = viewModel::dismissShiftBanner
                 )
+            }
+
+            state.errorMessage?.let { message ->
+                ErrorBanner(message = message, onDismiss = viewModel::consumeError, modifier = Modifier.padding(top = 4.dp))
             }
 
             Text(

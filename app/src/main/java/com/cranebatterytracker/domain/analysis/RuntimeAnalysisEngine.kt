@@ -5,26 +5,31 @@ import com.cranebatterytracker.domain.model.DomainEvent
 import com.cranebatterytracker.domain.model.EventType
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.domain.model.RuntimeClassification
-import java.util.UUID
 
 /**
  * Turns the raw event log into [DerivedCycle] records (spec sections 29-39,
  * 55-59). Raw events remain authoritative; this can be re-run at any time
- * and will always reproduce the same cycles for the same event log.
+ * and will always reproduce the same cycles - including the same
+ * [DerivedCycle.cycleId] values - for the same event log, so repeated
+ * exports/recomputations of an unchanged log can be joined and deduplicated.
  */
 class RuntimeAnalysisEngine(
     private val shiftEngine: ShiftEngine,
-    private val config: RuntimeAnalysisConfig = RuntimeAnalysisConfig(),
-    private val cycleIdGenerator: () -> String = { UUID.randomUUID().toString() }
+    private val config: RuntimeAnalysisConfig = RuntimeAnalysisConfig()
 ) {
 
     private class OpenInterval(
         val batteryId: Int,
         val startTimestamp: Long,
         val startEventId: String,
+        val startHadClockAnomaly: Boolean,
         var lastConfirmedAt: Long,
         var lastConfirmedEventId: String
     )
+
+    /** Stable across re-derivation: two events at fixed identities always define the same cycle. */
+    private fun stableCycleId(startEventId: String, endEventId: String?): String =
+        "$startEventId:${endEventId ?: "open"}"
 
     fun deriveCycles(allEvents: List<DomainEvent>): List<DerivedCycle> {
         val effective = EventFiltering.effectiveChronologicalEvents(allEvents)
@@ -42,6 +47,7 @@ class RuntimeAnalysisEngine(
                             batteryId = newBatteryId,
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
+                            startHadClockAnomaly = event.wallClockAnomalyDetected,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
                         )
@@ -64,6 +70,7 @@ class RuntimeAnalysisEngine(
                             batteryId = newBatteryId,
                             startTimestamp = event.timestampEpochMillis,
                             startEventId = event.eventId,
+                            startHadClockAnomaly = event.wallClockAnomalyDetected,
                             lastConfirmedAt = event.timestampEpochMillis,
                             lastConfirmedEventId = event.eventId
                         )
@@ -93,9 +100,17 @@ class RuntimeAnalysisEngine(
     private fun closeCleanDeath(interval: OpenInterval, endEvent: DomainEvent, remoteId: RemoteId): DerivedCycle {
         val rawDuration = endEvent.timestampEpochMillis - interval.startTimestamp
         val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, endEvent.timestampEpochMillis)
-        val classification = if (minimum == rawDuration) RuntimeClassification.EXACT else RuntimeClassification.SHIFT_INTERRUPTED
+        // Section 31: a reliable install and a reliable removal are necessary but not
+        // sufficient for EXACT - a wall-clock jump on either endpoint means the elapsed
+        // time itself can't be trusted, so such a cycle can be at best SHIFT_INTERRUPTED.
+        val clockAnomaly = interval.startHadClockAnomaly || endEvent.wallClockAnomalyDetected
+        val classification = if (minimum == rawDuration && !clockAnomaly) {
+            RuntimeClassification.EXACT
+        } else {
+            RuntimeClassification.SHIFT_INTERRUPTED
+        }
         return DerivedCycle(
-            cycleId = cycleIdGenerator(),
+            cycleId = stableCycleId(interval.startEventId, endEvent.eventId),
             batteryId = interval.batteryId,
             remoteId = remoteId,
             startTimestamp = interval.startTimestamp,
@@ -117,7 +132,7 @@ class RuntimeAnalysisEngine(
         return if (hadIntermediateConfirmation) {
             val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, interval.lastConfirmedAt)
             DerivedCycle(
-                cycleId = cycleIdGenerator(),
+                cycleId = stableCycleId(interval.startEventId, interval.lastConfirmedEventId),
                 batteryId = interval.batteryId,
                 remoteId = remoteId,
                 startTimestamp = interval.startTimestamp,
@@ -133,7 +148,7 @@ class RuntimeAnalysisEngine(
             )
         } else {
             DerivedCycle(
-                cycleId = cycleIdGenerator(),
+                cycleId = stableCycleId(interval.startEventId, null),
                 batteryId = interval.batteryId,
                 remoteId = remoteId,
                 startTimestamp = interval.startTimestamp,
