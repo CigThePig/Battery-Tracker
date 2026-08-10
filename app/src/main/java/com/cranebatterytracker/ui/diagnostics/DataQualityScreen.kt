@@ -74,7 +74,11 @@ fun DataQualityScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
                 QualityRow("Honest unknown gaps", it.unknownGaps.toString(), StatusUnknown)
                 QualityRow("Corrections that protected accuracy", it.corrections.toString(), StatusGood)
                 QualityRow("Unusual records held for review", it.suspiciousHighCount.toString(), StatusUnknown)
-                QualityRow("Records held for clock-integrity review", it.clockAnomalyShiftInterruptedCycles.toString(), StatusUnknown)
+                QualityRow(
+                    "Records held for clock-integrity review",
+                    (it.clockAnomalyShiftInterruptedCycles + it.clockAnomalyUnknownCycles).toString(),
+                    StatusUnknown
+                )
 
                 Text(
                     text = "Weak evidence is always shown as weak evidence - the app never presents a strong " +

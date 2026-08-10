@@ -295,15 +295,21 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
         val clockAnomalyShiftInterruptedCycles = cycles.count {
             it.classification == RuntimeClassification.SHIFT_INTERRUPTED && it.clockAnomalyDetected
         }
-        val unknownGaps = cycles.count { it.classification == RuntimeClassification.UNKNOWN }
+        // A clock-tainted UNKNOWN cycle (RuntimeAnalysisEngine.confirmedMinimum downgrading
+        // an anomaly-touched confirmation) has a known cause, unlike a genuine unknown gap -
+        // it belongs with the other clock-integrity records, not folded silently into
+        // "honest unknown gaps".
+        val clockAnomalyUnknownCycles = cycles.count {
+            it.classification == RuntimeClassification.UNKNOWN && it.clockAnomalyDetected
+        }
+        val unknownGaps = cycles.count { it.classification == RuntimeClassification.UNKNOWN && !it.clockAnomalyDetected }
         val confirmedMinimumObservations = cycles.count { it.classification == RuntimeClassification.CONFIRMED_MINIMUM }
         val suspiciousHighCount = cycles.count { it.isHighOutlier }
 
-        // The overall level formula still treats a confirmed-minimum cycle as incomplete
-        // evidence - it isn't a completed measurement either - but it is no longer
-        // reported to the operator as an "unknown gap", which is a genuinely different,
-        // more pessimistic claim than the app actually has evidence for.
-        val incompleteCycles = unknownGaps + confirmedMinimumObservations
+        // The overall level formula still treats a confirmed-minimum cycle - and a
+        // clock-tainted cycle downgraded to UNKNOWN - as incomplete evidence, even though
+        // neither is reported to the operator as an ordinary "unknown gap".
+        val incompleteCycles = unknownGaps + clockAnomalyUnknownCycles + confirmedMinimumObservations
         val totalCoverage = (exactCycles + shiftInterruptedCycles + incompleteCycles).coerceAtLeast(1)
         val incompleteRatio = incompleteCycles.toDouble() / totalCoverage
 
@@ -318,6 +324,7 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
             exactCycles = exactCycles,
             shiftInterruptedCycles = shiftInterruptedCycles,
             clockAnomalyShiftInterruptedCycles = clockAnomalyShiftInterruptedCycles,
+            clockAnomalyUnknownCycles = clockAnomalyUnknownCycles,
             unknownGaps = unknownGaps,
             confirmedMinimumObservations = confirmedMinimumObservations,
             corrections = correctionCount,

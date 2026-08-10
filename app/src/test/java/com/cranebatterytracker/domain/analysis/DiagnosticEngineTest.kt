@@ -279,4 +279,17 @@ class DiagnosticEngineTest {
         assertEquals(5, summary.confirmedMinimumObservations)
         assertEquals(2, summary.unknownGaps)
     }
+
+    @Test
+    fun `an unknown cycle downgraded by a clock anomaly is reported for review, not as an honest gap`() {
+        val genuineGap = exactCycle(1, RemoteId.WEST, 0, 0L)
+            .copy(classification = RuntimeClassification.UNKNOWN, includedInPrimaryStatistics = false)
+        val clockTaintedGap = exactCycle(1, RemoteId.WEST, 0, 100_000L)
+            .copy(classification = RuntimeClassification.UNKNOWN, includedInPrimaryStatistics = false, clockAnomalyDetected = true)
+
+        val summary = engine.dataQuality(listOf(genuineGap, clockTaintedGap), correctionCount = 0)
+
+        assertEquals(1, summary.unknownGaps)
+        assertEquals(1, summary.clockAnomalyUnknownCycles)
+    }
 }

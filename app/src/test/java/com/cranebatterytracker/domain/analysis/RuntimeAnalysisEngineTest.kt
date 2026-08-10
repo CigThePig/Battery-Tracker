@@ -303,6 +303,10 @@ class RuntimeAnalysisEngineTest {
         // time can't be trusted as a lower bound, so this must not read as reliable.
         assertEquals(RuntimeClassification.UNKNOWN, openCycle.classification)
         assertFalse(openCycle.includedInPrimaryStatistics)
+        // This UNKNOWN has a known cause - a clock anomaly, not an honest absence of
+        // evidence - and that cause must survive onto the cycle so downstream reporting
+        // doesn't lump it in with genuine unknown gaps.
+        assertTrue(openCycle.clockAnomalyDetected)
     }
 
     @Test

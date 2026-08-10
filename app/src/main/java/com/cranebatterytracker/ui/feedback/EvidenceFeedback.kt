@@ -88,6 +88,11 @@ object EvidenceFeedbackFactory {
             // quality threshold even though it's held for review rather than trusted, so a
             // completed cycle held for review must never be credited with the celebration.
             completedCycle?.isHighOutlier == true -> null
+            // A clock-tainted shift-interrupted cycle still counts toward dataQuality's
+            // totalCoverage, which can lower the incomplete ratio enough to raise
+            // afterQuality even though this exact completion's duration can't be trusted -
+            // that must not be celebrated either.
+            completedCycle?.clockAnomalyDetected == true -> null
             qualityRank(afterQuality) > qualityRank(beforeQuality) -> EvidenceMilestone.QualityImproved(afterQuality)
             beforeReliableCount < BASELINE_CYCLE_TARGET && afterReliableCount >= BASELINE_CYCLE_TARGET ->
                 EvidenceMilestone.BaselineEstablished(fromDisplayNumber)

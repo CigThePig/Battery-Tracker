@@ -187,7 +187,11 @@ class RuntimeAnalysisEngine(
         }
     }
 
-    private fun unknownCycle(interval: OpenInterval, remoteId: RemoteId): DerivedCycle = DerivedCycle(
+    private fun unknownCycle(
+        interval: OpenInterval,
+        remoteId: RemoteId,
+        clockAnomalyDetected: Boolean = false
+    ): DerivedCycle = DerivedCycle(
         cycleId = stableCycleId(interval.startEventId, null),
         batteryId = interval.batteryId,
         remoteId = remoteId,
@@ -201,7 +205,8 @@ class RuntimeAnalysisEngine(
         isShortRuntimeEvent = false,
         includedInPrimaryStatistics = false,
         startEventId = interval.startEventId,
-        endEventId = null
+        endEventId = null,
+        clockAnomalyDetected = clockAnomalyDetected
     )
 
     /**
@@ -216,7 +221,7 @@ class RuntimeAnalysisEngine(
      * an inflated or otherwise wrong duration as a reliable minimum.
      */
     private fun confirmedMinimum(interval: OpenInterval, remoteId: RemoteId): DerivedCycle {
-        if (interval.hasClockAnomaly) return unknownCycle(interval, remoteId)
+        if (interval.hasClockAnomaly) return unknownCycle(interval, remoteId, clockAnomalyDetected = true)
         val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, interval.lastConfirmedAt)
         return DerivedCycle(
             cycleId = stableCycleId(interval.startEventId, interval.lastConfirmedEventId),

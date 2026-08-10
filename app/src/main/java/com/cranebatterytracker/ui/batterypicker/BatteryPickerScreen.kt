@@ -414,19 +414,28 @@ private fun EvidenceValueCard(feedback: BatteryChangeFeedback) {
             val showsBaselineProgress = feedback.kind == EvidenceFeedbackKind.RELIABLE_RUN ||
                 feedback.kind == EvidenceFeedbackKind.PARTIAL_RUN ||
                 feedback.kind == EvidenceFeedbackKind.RUN_HELD_FOR_REVIEW
-            if (showsBaselineProgress && feedback.reliableCycleCount < EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET) {
-                LinearProgressIndicator(
-                    progress = feedback.reliableCycleCount.toFloat() / EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(7.dp).clip(CircleShape),
-                    color = StatusGood,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-                Text(
-                    text = "${EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET - feedback.reliableCycleCount} MORE TO FIRST BASELINE",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = StatusGood,
-                    modifier = Modifier.padding(top = 7.dp)
-                )
+            if (showsBaselineProgress) {
+                if (feedback.reliableCycleCount < EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET) {
+                    LinearProgressIndicator(
+                        progress = feedback.reliableCycleCount.toFloat() / EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET,
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(7.dp).clip(CircleShape),
+                        color = StatusGood,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    Text(
+                        text = "${EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET - feedback.reliableCycleCount} MORE TO FIRST BASELINE",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = StatusGood,
+                        modifier = Modifier.padding(top = 7.dp)
+                    )
+                } else {
+                    Text(
+                        text = "✓ BASELINE READY • ${feedback.reliableCycleCount} RELIABLE MEASUREMENTS",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = StatusGood,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                }
             }
         }
     }

@@ -52,7 +52,18 @@ data class DataQualitySummary(
      * total.
      */
     val clockAnomalyShiftInterruptedCycles: Int,
-    /** Cycles with no end evidence at all - genuinely missing data, not incomplete-but-useful data. */
+    /**
+     * Cycles RuntimeAnalysisEngine.confirmedMinimum downgraded from a would-be confirmed
+     * lower bound to UNKNOWN because a clock anomaly touched them. Distinct from
+     * [unknownGaps]: these have a known cause (a clock-integrity problem), not an honest
+     * absence of evidence, so they belong with [clockAnomalyShiftInterruptedCycles] under
+     * clock-integrity review rather than being silently folded into "unknown gaps".
+     */
+    val clockAnomalyUnknownCycles: Int,
+    /**
+     * Cycles with no end evidence at all - genuinely missing data, not incomplete-but-useful
+     * data. Excludes clock-anomaly-tainted cycles (see [clockAnomalyUnknownCycles]).
+     */
     val unknownGaps: Int,
     /**
      * Cycles with a confirmed lower bound ("still installed" at some later check) but no
