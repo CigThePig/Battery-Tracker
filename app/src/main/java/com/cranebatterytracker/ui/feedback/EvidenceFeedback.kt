@@ -20,7 +20,8 @@ data class BatteryChangeFeedback(
     val maximumRuntimeMillis: Long? = null,
     val batteryDisplayNumber: Int? = null,
     val reliableCycleCount: Int = 0,
-    val milestone: EvidenceMilestone? = null
+    val milestone: EvidenceMilestone? = null,
+    val clockAnomalyDetected: Boolean = false
 ) {
     val isMilestone: Boolean get() = milestone != null
 }
@@ -78,6 +79,10 @@ object EvidenceFeedbackFactory {
         }
 
         val milestone = when {
+            // A suspicious-high cycle can still push the fleet's exact-cycle count past a
+            // quality threshold even though it's held for review rather than trusted, so a
+            // completed cycle held for review must never be credited with the celebration.
+            completedCycle?.isHighOutlier == true -> null
             qualityRank(afterQuality) > qualityRank(beforeQuality) -> EvidenceMilestone.QualityImproved(afterQuality)
             beforeReliableCount < BASELINE_CYCLE_TARGET && afterReliableCount >= BASELINE_CYCLE_TARGET ->
                 EvidenceMilestone.BaselineEstablished(fromDisplayNumber)
@@ -106,7 +111,8 @@ object EvidenceFeedbackFactory {
             maximumRuntimeMillis = completedCycle?.maximumActiveRuntimeMillis,
             batteryDisplayNumber = fromDisplayNumber,
             reliableCycleCount = afterReliableCount,
-            milestone = milestone
+            milestone = milestone,
+            clockAnomalyDetected = completedCycle?.clockAnomalyDetected == true
         )
     }
 

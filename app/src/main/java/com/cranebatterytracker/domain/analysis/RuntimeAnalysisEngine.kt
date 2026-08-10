@@ -160,7 +160,8 @@ class RuntimeAnalysisEngine(
             isShortRuntimeEvent = false,
             includedInPrimaryStatistics = classification == RuntimeClassification.EXACT,
             startEventId = interval.startEventId,
-            endEventId = endEvent.eventId
+            endEventId = endEvent.eventId,
+            clockAnomalyDetected = classification == RuntimeClassification.SHIFT_INTERRUPTED && clockAnomaly
         )
     }
 

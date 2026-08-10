@@ -76,6 +76,7 @@ class RuntimeAnalysisEngineTest {
         assertEquals(RuntimeClassification.SHIFT_INTERRUPTED, cycle.classification)
         assertTrue(cycle.minimumActiveRuntimeMillis < cycle.maximumActiveRuntimeMillis)
         assertFalse(cycle.includedInPrimaryStatistics)
+        assertFalse(cycle.clockAnomalyDetected)
     }
 
     @Test
@@ -301,6 +302,10 @@ class RuntimeAnalysisEngineTest {
 
         assertEquals(RuntimeClassification.SHIFT_INTERRUPTED, cycle.classification)
         assertFalse(cycle.includedInPrimaryStatistics)
+        // The whole interval sat inside definitely-active time - min == max - so nothing
+        // about a shift boundary caused the downgrade; the clock anomaly flag must say so.
+        assertEquals(cycle.minimumActiveRuntimeMillis, cycle.maximumActiveRuntimeMillis)
+        assertTrue(cycle.clockAnomalyDetected)
     }
 
     @Test

@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.cranebatterytracker.domain.model.DataQualityLevel
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.domain.model.RemoteState
 import com.cranebatterytracker.ui.common.ErrorBanner
@@ -355,7 +356,8 @@ private fun EvidenceStatusStrip(progress: EvidenceProgressUiState, onClick: () -
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
                 Text(
-                    text = if (nextTarget == null) "STRONG EVIDENCE BUILT • VIEW RESULTS →"
+                    text = if (progress.qualityLevel == DataQualityLevel.STRONG) "STRONG EVIDENCE BUILT • VIEW RESULTS →"
+                    else if (nextTarget == null) "EVIDENCE MILESTONES COMPLETE • VIEW RESULTS →"
                     else "NEXT EVIDENCE MILESTONE: $nextTarget EXACT RUNS • VIEW →",
                     style = MaterialTheme.typography.bodyMedium,
                     color = StatusGood,

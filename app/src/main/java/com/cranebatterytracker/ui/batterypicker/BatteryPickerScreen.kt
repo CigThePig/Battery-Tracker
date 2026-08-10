@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
@@ -430,7 +431,11 @@ private fun partialRuntimeDetail(feedback: BatteryChangeFeedback): String {
     val minimum = feedback.minimumRuntimeMillis ?: return "The observation was saved without pretending it was exact."
     val maximum = feedback.maximumRuntimeMillis ?: minimum
     return if (minimum == maximum) {
-        "${formatDurationHoursMinutes(minimum)} was observed. The shift boundary keeps it out of the exact average."
+        if (feedback.clockAnomalyDetected) {
+            "${formatDurationHoursMinutes(minimum)} was observed. A clock irregularity keeps it out of the exact average."
+        } else {
+            "${formatDurationHoursMinutes(minimum)} was observed. The shift boundary keeps it out of the exact average."
+        }
     } else {
         "${formatDurationHoursMinutes(minimum)}–${formatDurationHoursMinutes(maximum)} active runtime was preserved without guessing."
     }

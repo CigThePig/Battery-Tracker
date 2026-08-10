@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.cranebatterytracker.backup.BackupStatus
 import com.cranebatterytracker.domain.model.BatteryHealth
 import com.cranebatterytracker.domain.model.BatteryTrend
+import com.cranebatterytracker.domain.model.DataQualityLevel
 import com.cranebatterytracker.domain.model.DataQualitySummary
 import com.cranebatterytracker.ui.common.formatDurationHoursMinutes
 import com.cranebatterytracker.ui.feedback.EvidenceFeedbackFactory
@@ -140,7 +142,8 @@ private fun EvidenceOverviewCard(quality: DataQualitySummary) {
                     trackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
                 Text(
-                    if (nextTarget == null) "Strong evidence has been built across the battery fleet."
+                    if (quality.overallLevel == DataQualityLevel.STRONG) "Strong evidence has been built across the battery fleet."
+                    else if (nextTarget == null) "Exact-run milestones are complete, but data quality is not yet strong."
                     else "Every accurate change moves the fleet toward $nextTarget exact runs.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = StatusGood,
