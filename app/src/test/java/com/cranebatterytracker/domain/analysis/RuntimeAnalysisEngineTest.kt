@@ -76,6 +76,7 @@ class RuntimeAnalysisEngineTest {
         assertEquals(RuntimeClassification.SHIFT_INTERRUPTED, cycle.classification)
         assertTrue(cycle.minimumActiveRuntimeMillis < cycle.maximumActiveRuntimeMillis)
         assertFalse(cycle.includedInPrimaryStatistics)
+        assertFalse(cycle.clockAnomalyDetected)
     }
 
     @Test
@@ -256,6 +257,33 @@ class RuntimeAnalysisEngineTest {
     }
 
     @Test
+    fun `openIntervalClockAnomalies reports true for a still-open interval poisoned by a clock jump`() {
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val anomalyTime = millisAt(2024, 1, 1, 7, 0)
+        val install = testBatteryChange(start, RemoteId.WEST, null, 2)
+        val anomalousConfirm = testEvent(
+            timestamp = anomalyTime,
+            remoteId = RemoteId.WEST,
+            batteryId = 2,
+            eventType = EventType.STATE_CONFIRMED
+        ).copy(wallClockAnomalyDetected = true)
+
+        val anomalies = engine.openIntervalClockAnomalies(install + listOf(anomalousConfirm))
+
+        assertTrue(anomalies[RemoteId.WEST] == true)
+    }
+
+    @Test
+    fun `openIntervalClockAnomalies is false for a clean still-open interval`() {
+        val start = millisAt(2024, 1, 1, 6, 0)
+        val install = testBatteryChange(start, RemoteId.WEST, null, 2)
+
+        val anomalies = engine.openIntervalClockAnomalies(install)
+
+        assertFalse(anomalies[RemoteId.WEST] == true)
+    }
+
+    @Test
     fun `a still-open interval confirmed under a clock anomaly is not presented as a reliable minimum`() {
         val start = millisAt(2024, 1, 1, 6, 0)
         val confirmTime = millisAt(2024, 1, 1, 9, 15)
@@ -275,6 +303,10 @@ class RuntimeAnalysisEngineTest {
         // time can't be trusted as a lower bound, so this must not read as reliable.
         assertEquals(RuntimeClassification.UNKNOWN, openCycle.classification)
         assertFalse(openCycle.includedInPrimaryStatistics)
+        // This UNKNOWN has a known cause - a clock anomaly, not an honest absence of
+        // evidence - and that cause must survive onto the cycle so downstream reporting
+        // doesn't lump it in with genuine unknown gaps.
+        assertTrue(openCycle.clockAnomalyDetected)
     }
 
     @Test
@@ -301,6 +333,10 @@ class RuntimeAnalysisEngineTest {
 
         assertEquals(RuntimeClassification.SHIFT_INTERRUPTED, cycle.classification)
         assertFalse(cycle.includedInPrimaryStatistics)
+        // The whole interval sat inside definitely-active time - min == max - so nothing
+        // about a shift boundary caused the downgrade; the clock anomaly flag must say so.
+        assertEquals(cycle.minimumActiveRuntimeMillis, cycle.maximumActiveRuntimeMillis)
+        assertTrue(cycle.clockAnomalyDetected)
     }
 
     @Test

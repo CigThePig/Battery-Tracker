@@ -19,7 +19,14 @@ data class DerivedCycle(
     val isShortRuntimeEvent: Boolean,
     val includedInPrimaryStatistics: Boolean,
     val startEventId: String,
-    val endEventId: String?
+    val endEventId: String?,
+    /**
+     * True when this cycle was kept out of EXACT because a wall-clock jump or a lost
+     * monotonic timeline touched it, rather than because it genuinely crossed a shift
+     * boundary. Only meaningful for [RuntimeClassification.SHIFT_INTERRUPTED] cycles -
+     * operator-facing copy must not blame a shift boundary for a clock-integrity problem.
+     */
+    val clockAnomalyDetected: Boolean = false
 ) {
     /** EXACT cycles always have minimum == maximum. */
     val exactRuntimeMillisOrNull: Long?

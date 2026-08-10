@@ -10,6 +10,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /**
@@ -61,13 +62,16 @@ class RebootMarkerOrderingTest {
         // A correction is the first interaction after the reboot instead of a normal
         // battery change - STATE_CORRECTED opens a new interval too, so it needs the same
         // marker-ordering protection as BATTERY_INSTALLED.
-        correctUseCase(RemoteId.WEST, newBatteryId = 2, now = millisAt(8, 0), elapsedRealtimeMillis = 5_000)
+        val correctionResult = correctUseCase(RemoteId.WEST, newBatteryId = 2, now = millisAt(8, 0), elapsedRealtimeMillis = 5_000)
         changeUseCase(RemoteId.WEST, 3, now = millisAt(10, 0), elapsedRealtimeMillis = 5_000 + 2 * 3_600_000L)
 
         val cycles = runtimeEngine.deriveCycles(repository.allEvents())
         val battery2Cycle = cycles.single { it.batteryId == 2 }
 
         assertEquals(RuntimeClassification.EXACT, battery2Cycle.classification)
+        // A monotonic-only break doesn't taint the new interval this correction opens, so
+        // the result the operator sees must not be reported as clock-anomalous either.
+        assertFalse(correctionResult.clockAnomalyDetected)
     }
 
     @Test

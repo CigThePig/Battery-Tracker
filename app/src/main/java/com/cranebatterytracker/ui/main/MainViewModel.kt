@@ -8,12 +8,14 @@ import com.cranebatterytracker.domain.analysis.EventFiltering
 import com.cranebatterytracker.domain.analysis.EventReducer
 import com.cranebatterytracker.domain.analysis.ShiftEngine
 import com.cranebatterytracker.domain.model.Battery
+import com.cranebatterytracker.domain.model.DataQualityLevel
 import com.cranebatterytracker.domain.model.DomainEvent
 import com.cranebatterytracker.domain.model.EventType
 import com.cranebatterytracker.domain.model.Remote
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.domain.model.RemoteKnowledge
 import com.cranebatterytracker.domain.model.RemoteState
+import com.cranebatterytracker.domain.model.ShiftActivityLevel
 import com.cranebatterytracker.domain.model.batteryIdOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -27,7 +29,15 @@ data class RemoteCardUiState(
     val remoteId: RemoteId,
     val remote: Remote,
     val state: RemoteState,
-    val batteryDisplayNumber: Int?
+    val batteryDisplayNumber: Int?,
+    val activeShiftTracking: Boolean
+)
+
+data class EvidenceProgressUiState(
+    val exactCycleCount: Int,
+    val usefulObservationCount: Int,
+    val qualityLevel: DataQualityLevel,
+    val nextExactCycleMilestone: Int?
 )
 
 data class ShiftBannerUiState(
@@ -42,6 +52,7 @@ data class MainUiState(
     val shiftBanner: ShiftBannerUiState? = null,
     val recentActionMessage: String? = null,
     val recentActionGroupId: String? = null,
+    val evidenceProgress: EvidenceProgressUiState? = null,
     val busy: Boolean = false,
     val errorMessage: String? = null
 )
@@ -83,7 +94,9 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         val shiftEngine: ShiftEngine,
         val recentGroupId: String?,
         val recentTimestamp: Long?,
-        val recentSummary: String?
+        val recentSummary: String?,
+        val evidenceProgress: EvidenceProgressUiState,
+        val openIntervalClockAnomalies: Map<RemoteId, Boolean>
     )
 
     private val eventDerivedState = combine(
@@ -93,6 +106,13 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsRepository.settings
     ) { events, batteries, remotes, settings ->
         val shiftEngine = container.shiftEngine(settings)
+        val runtimeAnalysisEngine = container.runtimeAnalysisEngine(settings)
+        val cycles = runtimeAnalysisEngine.deriveCycles(events)
+        val openIntervalClockAnomalies = runtimeAnalysisEngine.openIntervalClockAnomalies(events)
+        val correctionCount = container.diagnosticEngine.correctionCount(
+            EventFiltering.effectiveChronologicalEvents(events)
+        )
+        val quality = container.diagnosticEngine.dataQuality(cycles, correctionCount)
         val knowledge = EventReducer.reduce(events)
         val remotesById = remotes.associateBy(Remote::remoteId) { remote ->
             // The admin-configurable name in Settings, not the immutable seeded
@@ -120,7 +140,15 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             shiftEngine = shiftEngine,
             recentGroupId = latestGroupEvents?.firstOrNull()?.actionGroupId,
             recentTimestamp = latestGroupEvents?.maxOfOrNull { it.timestampEpochMillis },
-            recentSummary = latestGroupEvents?.let { buildActionSummary(it, batteries, remotesById) }
+            recentSummary = latestGroupEvents?.let { buildActionSummary(it, batteries, remotesById) },
+            evidenceProgress = EvidenceProgressUiState(
+                exactCycleCount = quality.exactCycles,
+                usefulObservationCount = (quality.shiftInterruptedCycles - quality.clockAnomalyShiftInterruptedCycles) +
+                    quality.confirmedMinimumObservations,
+                qualityLevel = quality.overallLevel,
+                nextExactCycleMilestone = nextEvidenceMilestone(quality.exactCycles)
+            ),
+            openIntervalClockAnomalies = openIntervalClockAnomalies
         )
     }
 
@@ -133,7 +161,10 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                 remoteId = remoteId,
                 remote = remote,
                 state = state,
-                batteryDisplayNumber = state.batteryIdOrNull?.let { data.batteriesById[it]?.displayNumber }
+                batteryDisplayNumber = state.batteryIdOrNull?.let { data.batteriesById[it]?.displayNumber },
+                activeShiftTracking = state is RemoteState.Confirmed &&
+                    data.shiftEngine.classify(now) == ShiftActivityLevel.DEFINITELY_ACTIVE &&
+                    data.openIntervalClockAnomalies[remoteId] != true
             )
         }
 
@@ -160,6 +191,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             shiftBanner = shiftBanner,
             recentActionMessage = recentMessage,
             recentActionGroupId = if (recentMessage != null) data.recentGroupId else null,
+            evidenceProgress = data.evidenceProgress,
             busy = busy.value,
             errorMessage = transientError.value
         )
@@ -238,7 +270,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         val installed = groupEvents.firstOrNull { it.eventType == EventType.BATTERY_INSTALLED }
         val removed = groupEvents.firstOrNull { it.eventType == EventType.BATTERY_REMOVED_DEAD }
         val corrected = groupEvents.firstOrNull { it.eventType == EventType.STATE_CORRECTED }
-        val confirmed = groupEvents.firstOrNull { it.eventType == EventType.STATE_CONFIRMED }
+        val confirmations = groupEvents.filter { it.eventType == EventType.STATE_CONFIRMED }
+        val confirmed = confirmations.firstOrNull()
         val markedUnknown = groupEvents.firstOrNull { it.eventType == EventType.STATE_MARKED_UNKNOWN }
 
         return when {
@@ -253,20 +286,47 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
             corrected != null -> {
                 val shortName = remotesById[corrected.remoteId]?.shortName ?: return null
-                "$shortName corrected to ${label(corrected.newBatteryId)}"
+                if (corrected.previousBatteryId == null) {
+                    // No prior identity or open interval existed here (e.g. a shift-start
+                    // FIX WEST/EAST on a previously unknown remote) - this sets a fresh
+                    // starting point, not a correction of anything, so it shouldn't claim
+                    // a "catch" was made.
+                    "$shortName ${label(corrected.newBatteryId)} SET"
+                } else {
+                    "GOOD CATCH • $shortName corrected to ${label(corrected.newBatteryId)}"
+                }
+            }
+
+            confirmations.mapNotNull { it.remoteId }.distinct().size > 1 -> {
+                if (confirmations.any { it.wallClockAnomalyDetected || it.monotonicContinuityBroken }) {
+                    "BOTH REMOTES CONFIRMED • CLOCK IRREGULARITY DETECTED"
+                } else {
+                    "BOTH REMOTES CONFIRMED • SHIFT TRACKING PROTECTED"
+                }
             }
 
             confirmed != null -> {
                 val shortName = remotesById[confirmed.remoteId]?.shortName ?: return null
-                "$shortName ${label(confirmed.batteryId)} confirmed"
+                if (confirmed.wallClockAnomalyDetected || confirmed.monotonicContinuityBroken) {
+                    "$shortName ${label(confirmed.batteryId)} CONFIRMED • CLOCK IRREGULARITY DETECTED"
+                } else {
+                    "$shortName ${label(confirmed.batteryId)} CONFIRMED • TRACKING PROTECTED"
+                }
             }
 
             markedUnknown != null -> {
                 val shortName = remotesById[markedUnknown.remoteId]?.shortName ?: return null
-                "$shortName marked unknown"
+                "$shortName UNKNOWN • NO GUESS ADDED"
             }
 
             else -> null
         }
+    }
+
+    private fun nextEvidenceMilestone(exactCycles: Int): Int? = when {
+        exactCycles < 10 -> 10
+        exactCycles < 30 -> 30
+        exactCycles < 60 -> 60
+        else -> null
     }
 }

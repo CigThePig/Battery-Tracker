@@ -10,6 +10,9 @@ import com.cranebatterytracker.domain.model.other
 import com.cranebatterytracker.domain.repository.BatteryTrackerRepository
 import java.util.UUID
 
+/** Whether the write this use case just made carries a clock-integrity warning, so callers can avoid claiming verified evidence for it. */
+data class CorrectStateResult(val clockAnomalyDetected: Boolean)
+
 /**
  * "The tablet currently says X, what's actually in the remote?" (spec
  * sections 17-19, 21, 64). This never fabricates a dead event for the
@@ -28,8 +31,8 @@ class CorrectStateUseCase(
         now: Long = System.currentTimeMillis(),
         elapsedRealtimeMillis: Long = now,
         resolveCollision: Boolean = false
-    ) {
-        repository.inTransaction {
+    ): CorrectStateResult {
+        return repository.inTransaction {
             val priorEvents = repository.currentEventsSnapshot()
             val knowledge = EventReducer.reduce(priorEvents)
             val previousBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
@@ -77,7 +80,7 @@ class CorrectStateUseCase(
                         )
                     }
                 )
-                return@inTransaction
+                return@inTransaction CorrectStateResult(clockAnomalyDetected = anomalyDetected || monotonicContinuityBroken)
             }
 
             val otherRemote = remoteId.other()
@@ -152,6 +155,12 @@ class CorrectStateUseCase(
             }
 
             repository.writeEventGroup(events)
+            // Unlike the same-battery confirmation above, this opens a brand-new interval
+            // starting at `now` (see RuntimeAnalysisEngine's STATE_CORRECTED handling) - a
+            // monotonic-only break says continuity was lost *before* this event, which
+            // doesn't taint an interval that runs entirely on the post-reboot clock going
+            // forward. Only a wall-clock jump makes this event's own start time untrustworthy.
+            CorrectStateResult(clockAnomalyDetected = anomalyDetected)
         }
     }
 }

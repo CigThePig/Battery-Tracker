@@ -64,6 +64,20 @@ class CorrectStateUseCaseTest {
     }
 
     @Test
+    fun `a correction to a different battery reports a wall-clock jump but not a mere reboot`() = runTest {
+        val repository = FakeBatteryTrackerRepository()
+        val changeUseCase = BatteryChangeUseCase(repository, "test")
+        val correctUseCase = CorrectStateUseCase(repository, "test")
+
+        changeUseCase(RemoteId.WEST, 2, now = 1_000, elapsedRealtimeMillis = 1_000)
+        // Wall clock jumps forward ten minutes while the monotonic clock only advances one
+        // second - a genuine wall-clock anomaly, not a reboot (monotonic still moves forward).
+        val result = correctUseCase(RemoteId.WEST, newBatteryId = 4, now = 1_000 + 600_000, elapsedRealtimeMillis = 2_000)
+
+        assertTrue(result.clockAnomalyDetected)
+    }
+
+    @Test
     fun `correcting to the already-displayed battery confirms instead of correcting`() = runTest {
         val repository = FakeBatteryTrackerRepository()
         val changeUseCase = BatteryChangeUseCase(repository, "test")

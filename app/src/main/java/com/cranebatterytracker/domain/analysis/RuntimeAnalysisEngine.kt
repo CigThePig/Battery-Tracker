@@ -32,7 +32,19 @@ class RuntimeAnalysisEngine(
     private fun stableCycleId(startEventId: String, endEventId: String?): String =
         "$startEventId:${endEventId ?: "open"}"
 
-    fun deriveCycles(allEvents: List<DomainEvent>): List<DerivedCycle> {
+    fun deriveCycles(allEvents: List<DomainEvent>): List<DerivedCycle> =
+        applyStatisticalClassification(deriveRaw(allEvents).first)
+
+    /**
+     * Whether the interval currently open on each remote (if any) has been touched by a
+     * clock anomaly - a wall-clock jump or a lost monotonic timeline - and therefore
+     * cannot yet be presented as actively producing trustworthy evidence, even though the
+     * remote's confirmed state is otherwise fresh (spec section 31).
+     */
+    fun openIntervalClockAnomalies(allEvents: List<DomainEvent>): Map<RemoteId, Boolean> =
+        deriveRaw(allEvents).second.mapValues { it.value.hasClockAnomaly }
+
+    private fun deriveRaw(allEvents: List<DomainEvent>): Pair<List<DerivedCycle>, Map<RemoteId, OpenInterval>> {
         val effective = EventFiltering.effectiveChronologicalEvents(allEvents)
         val open = mutableMapOf<RemoteId, OpenInterval>()
         val cycles = mutableListOf<DerivedCycle>()
@@ -129,7 +141,7 @@ class RuntimeAnalysisEngine(
             }
         }
 
-        return applyStatisticalClassification(cycles)
+        return cycles to open
     }
 
     private fun closeCleanDeath(interval: OpenInterval, endEvent: DomainEvent, remoteId: RemoteId): DerivedCycle {
@@ -160,7 +172,8 @@ class RuntimeAnalysisEngine(
             isShortRuntimeEvent = false,
             includedInPrimaryStatistics = classification == RuntimeClassification.EXACT,
             startEventId = interval.startEventId,
-            endEventId = endEvent.eventId
+            endEventId = endEvent.eventId,
+            clockAnomalyDetected = classification == RuntimeClassification.SHIFT_INTERRUPTED && clockAnomaly
         )
     }
 
@@ -174,7 +187,11 @@ class RuntimeAnalysisEngine(
         }
     }
 
-    private fun unknownCycle(interval: OpenInterval, remoteId: RemoteId): DerivedCycle = DerivedCycle(
+    private fun unknownCycle(
+        interval: OpenInterval,
+        remoteId: RemoteId,
+        clockAnomalyDetected: Boolean = false
+    ): DerivedCycle = DerivedCycle(
         cycleId = stableCycleId(interval.startEventId, null),
         batteryId = interval.batteryId,
         remoteId = remoteId,
@@ -188,7 +205,8 @@ class RuntimeAnalysisEngine(
         isShortRuntimeEvent = false,
         includedInPrimaryStatistics = false,
         startEventId = interval.startEventId,
-        endEventId = null
+        endEventId = null,
+        clockAnomalyDetected = clockAnomalyDetected
     )
 
     /**
@@ -203,7 +221,7 @@ class RuntimeAnalysisEngine(
      * an inflated or otherwise wrong duration as a reliable minimum.
      */
     private fun confirmedMinimum(interval: OpenInterval, remoteId: RemoteId): DerivedCycle {
-        if (interval.hasClockAnomaly) return unknownCycle(interval, remoteId)
+        if (interval.hasClockAnomaly) return unknownCycle(interval, remoteId, clockAnomalyDetected = true)
         val (minimum, maximum) = shiftEngine.activeRuntimeRange(interval.startTimestamp, interval.lastConfirmedAt)
         return DerivedCycle(
             cycleId = stableCycleId(interval.startEventId, interval.lastConfirmedEventId),
