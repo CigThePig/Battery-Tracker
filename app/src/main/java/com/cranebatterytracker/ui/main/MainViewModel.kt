@@ -95,7 +95,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         val recentGroupId: String?,
         val recentTimestamp: Long?,
         val recentSummary: String?,
-        val evidenceProgress: EvidenceProgressUiState
+        val evidenceProgress: EvidenceProgressUiState,
+        val openIntervalClockAnomalies: Map<RemoteId, Boolean>
     )
 
     private val eventDerivedState = combine(
@@ -105,7 +106,9 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsRepository.settings
     ) { events, batteries, remotes, settings ->
         val shiftEngine = container.shiftEngine(settings)
-        val cycles = container.runtimeAnalysisEngine(settings).deriveCycles(events)
+        val runtimeAnalysisEngine = container.runtimeAnalysisEngine(settings)
+        val cycles = runtimeAnalysisEngine.deriveCycles(events)
+        val openIntervalClockAnomalies = runtimeAnalysisEngine.openIntervalClockAnomalies(events)
         val correctionCount = container.diagnosticEngine.correctionCount(
             EventFiltering.effectiveChronologicalEvents(events)
         )
@@ -143,7 +146,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                 usefulObservationCount = quality.shiftInterruptedCycles + quality.confirmedMinimumObservations,
                 qualityLevel = quality.overallLevel,
                 nextExactCycleMilestone = nextEvidenceMilestone(quality.exactCycles)
-            )
+            ),
+            openIntervalClockAnomalies = openIntervalClockAnomalies
         )
     }
 
@@ -158,7 +162,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
                 state = state,
                 batteryDisplayNumber = state.batteryIdOrNull?.let { data.batteriesById[it]?.displayNumber },
                 activeShiftTracking = state is RemoteState.Confirmed &&
-                    data.shiftEngine.classify(now) == ShiftActivityLevel.DEFINITELY_ACTIVE
+                    data.shiftEngine.classify(now) == ShiftActivityLevel.DEFINITELY_ACTIVE &&
+                    data.openIntervalClockAnomalies[remoteId] != true
             )
         }
 

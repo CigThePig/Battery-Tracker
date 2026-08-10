@@ -197,10 +197,19 @@ private fun IntegrityReceipt(feedback: CorrectionFeedback, onDone: () -> Unit) {
     val detail: String
     val stateLine: String
     when (feedback.kind) {
+        CorrectionFeedbackKind.TRACKING_STARTED -> {
+            headline = "TRACKING STARTED"
+            stateLine = "${feedback.remoteDisplayName.uppercase()} NOW SHOWS BATTERY ${feedback.newBatteryDisplayNumber}"
+            detail = "This confirmed state gives the next battery change a trustworthy starting point."
+        }
         CorrectionFeedbackKind.CONFIRMED -> {
             headline = "STATE CONFIRMED"
             stateLine = "BATTERY ${feedback.newBatteryDisplayNumber} IS STILL IN ${feedback.remoteDisplayName.uppercase()}"
-            detail = "This fresh confirmation extends a verified observation and protects shift tracking."
+            detail = if (feedback.clockAnomalyDetected) {
+                "This confirmation was saved, but a clock irregularity keeps it from extending a verified observation."
+            } else {
+                "This fresh confirmation extends a verified observation and protects shift tracking."
+            }
         }
         CorrectionFeedbackKind.CORRECTED -> {
             headline = "GOOD CATCH"

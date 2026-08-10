@@ -32,7 +32,19 @@ class RuntimeAnalysisEngine(
     private fun stableCycleId(startEventId: String, endEventId: String?): String =
         "$startEventId:${endEventId ?: "open"}"
 
-    fun deriveCycles(allEvents: List<DomainEvent>): List<DerivedCycle> {
+    fun deriveCycles(allEvents: List<DomainEvent>): List<DerivedCycle> =
+        applyStatisticalClassification(deriveRaw(allEvents).first)
+
+    /**
+     * Whether the interval currently open on each remote (if any) has been touched by a
+     * clock anomaly - a wall-clock jump or a lost monotonic timeline - and therefore
+     * cannot yet be presented as actively producing trustworthy evidence, even though the
+     * remote's confirmed state is otherwise fresh (spec section 31).
+     */
+    fun openIntervalClockAnomalies(allEvents: List<DomainEvent>): Map<RemoteId, Boolean> =
+        deriveRaw(allEvents).second.mapValues { it.value.hasClockAnomaly }
+
+    private fun deriveRaw(allEvents: List<DomainEvent>): Pair<List<DerivedCycle>, Map<RemoteId, OpenInterval>> {
         val effective = EventFiltering.effectiveChronologicalEvents(allEvents)
         val open = mutableMapOf<RemoteId, OpenInterval>()
         val cycles = mutableListOf<DerivedCycle>()
@@ -129,7 +141,7 @@ class RuntimeAnalysisEngine(
             }
         }
 
-        return applyStatisticalClassification(cycles)
+        return cycles to open
     }
 
     private fun closeCleanDeath(interval: OpenInterval, endEvent: DomainEvent, remoteId: RemoteId): DerivedCycle {

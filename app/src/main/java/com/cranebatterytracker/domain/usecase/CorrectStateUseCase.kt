@@ -10,6 +10,9 @@ import com.cranebatterytracker.domain.model.other
 import com.cranebatterytracker.domain.repository.BatteryTrackerRepository
 import java.util.UUID
 
+/** Whether the write this use case just made carries a clock-integrity warning, so callers can avoid claiming verified evidence for it. */
+data class CorrectStateResult(val clockAnomalyDetected: Boolean)
+
 /**
  * "The tablet currently says X, what's actually in the remote?" (spec
  * sections 17-19, 21, 64). This never fabricates a dead event for the
@@ -28,8 +31,8 @@ class CorrectStateUseCase(
         now: Long = System.currentTimeMillis(),
         elapsedRealtimeMillis: Long = now,
         resolveCollision: Boolean = false
-    ) {
-        repository.inTransaction {
+    ): CorrectStateResult {
+        return repository.inTransaction {
             val priorEvents = repository.currentEventsSnapshot()
             val knowledge = EventReducer.reduce(priorEvents)
             val previousBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
@@ -77,7 +80,7 @@ class CorrectStateUseCase(
                         )
                     }
                 )
-                return@inTransaction
+                return@inTransaction CorrectStateResult(clockAnomalyDetected = anomalyDetected || monotonicContinuityBroken)
             }
 
             val otherRemote = remoteId.other()
@@ -152,6 +155,7 @@ class CorrectStateUseCase(
             }
 
             repository.writeEventGroup(events)
+            CorrectStateResult(clockAnomalyDetected = anomalyDetected || monotonicContinuityBroken)
         }
     }
 }

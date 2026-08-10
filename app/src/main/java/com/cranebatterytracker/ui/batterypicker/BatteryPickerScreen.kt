@@ -407,9 +407,10 @@ private fun EvidenceValueCard(feedback: BatteryChangeFeedback) {
                 modifier = Modifier.padding(top = 5.dp)
             )
 
-            if (feedback.kind == EvidenceFeedbackKind.RELIABLE_RUN &&
-                feedback.reliableCycleCount < EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET
-            ) {
+            val showsBaselineProgress = feedback.kind == EvidenceFeedbackKind.RELIABLE_RUN ||
+                feedback.kind == EvidenceFeedbackKind.PARTIAL_RUN ||
+                feedback.kind == EvidenceFeedbackKind.RUN_HELD_FOR_REVIEW
+            if (showsBaselineProgress && feedback.reliableCycleCount < EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET) {
                 LinearProgressIndicator(
                     progress = feedback.reliableCycleCount.toFloat() / EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(7.dp).clip(CircleShape),

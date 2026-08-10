@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 
 data class CollisionPrompt(val batteryId: Int, val batteryDisplayNumber: Int, val otherRemoteShortName: String)
 
-enum class CorrectionFeedbackKind { CONFIRMED, CORRECTED, MARKED_UNKNOWN, COLLISION_RESOLVED }
+enum class CorrectionFeedbackKind { TRACKING_STARTED, CONFIRMED, CORRECTED, MARKED_UNKNOWN, COLLISION_RESOLVED }
 
 data class CorrectionFeedback(
     val kind: CorrectionFeedbackKind,
@@ -28,7 +28,8 @@ data class CorrectionFeedback(
     val remoteDisplayName: String,
     val previousBatteryDisplayNumber: Int?,
     val newBatteryDisplayNumber: Int? = null,
-    val otherRemoteShortName: String? = null
+    val otherRemoteShortName: String? = null,
+    val clockAnomalyDetected: Boolean = false
 )
 
 data class CorrectionUiState(
@@ -99,20 +100,24 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
             runCatching {
                 container.correctStateUseCase(remoteId, batteryId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
             }
-                .onSuccess {
+                .onSuccess { result ->
                     val newNumber = snapshot.batteries.firstOrNull { it.batteryId == batteryId }?.displayNumber ?: batteryId
                     localState.value = localState.value.copy(
                         submitting = false,
                         feedback = CorrectionFeedback(
-                            kind = if (snapshot.currentBatteryDisplayNumber == newNumber) {
-                                CorrectionFeedbackKind.CONFIRMED
-                            } else {
-                                CorrectionFeedbackKind.CORRECTED
+                            kind = when {
+                                // No prior identity or open interval existed here, so this
+                                // sets a fresh starting point rather than confirming or
+                                // correcting anything.
+                                snapshot.currentBatteryDisplayNumber == null -> CorrectionFeedbackKind.TRACKING_STARTED
+                                snapshot.currentBatteryDisplayNumber == newNumber -> CorrectionFeedbackKind.CONFIRMED
+                                else -> CorrectionFeedbackKind.CORRECTED
                             },
                             remoteId = remoteId,
                             remoteDisplayName = snapshot.remoteDisplayName,
                             previousBatteryDisplayNumber = snapshot.currentBatteryDisplayNumber,
-                            newBatteryDisplayNumber = newNumber
+                            newBatteryDisplayNumber = newNumber,
+                            clockAnomalyDetected = result.clockAnomalyDetected
                         )
                     )
                 }
