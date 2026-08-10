@@ -292,6 +292,9 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
     fun dataQuality(cycles: List<DerivedCycle>, correctionCount: Int): DataQualitySummary {
         val exactCycles = cycles.count { it.classification == RuntimeClassification.EXACT }
         val shiftInterruptedCycles = cycles.count { it.classification == RuntimeClassification.SHIFT_INTERRUPTED }
+        val clockAnomalyShiftInterruptedCycles = cycles.count {
+            it.classification == RuntimeClassification.SHIFT_INTERRUPTED && it.clockAnomalyDetected
+        }
         val unknownGaps = cycles.count { it.classification == RuntimeClassification.UNKNOWN }
         val confirmedMinimumObservations = cycles.count { it.classification == RuntimeClassification.CONFIRMED_MINIMUM }
         val suspiciousHighCount = cycles.count { it.isHighOutlier }
@@ -314,6 +317,7 @@ class DiagnosticEngine(private val config: DiagnosticConfig = DiagnosticConfig()
         return DataQualitySummary(
             exactCycles = exactCycles,
             shiftInterruptedCycles = shiftInterruptedCycles,
+            clockAnomalyShiftInterruptedCycles = clockAnomalyShiftInterruptedCycles,
             unknownGaps = unknownGaps,
             confirmedMinimumObservations = confirmedMinimumObservations,
             corrections = correctionCount,

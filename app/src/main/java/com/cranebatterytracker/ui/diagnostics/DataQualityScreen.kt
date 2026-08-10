@@ -63,13 +63,18 @@ fun DataQualityScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
 
                 Text("WHAT ACCURATE ENTRIES HAVE BUILT", style = MaterialTheme.typography.titleMedium)
                 QualityRow("Exact runs captured", it.exactCycles.toString(), StatusGood)
-                QualityRow("Useful partial runs", it.shiftInterruptedCycles.toString(), StatusWarn)
+                QualityRow(
+                    "Useful partial runs",
+                    (it.shiftInterruptedCycles - it.clockAnomalyShiftInterruptedCycles).toString(),
+                    StatusWarn
+                )
                 QualityRow("Confirmed minimum observations", it.confirmedMinimumObservations.toString(), StatusWarn)
 
                 Text("DATA PROTECTION", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 14.dp))
                 QualityRow("Honest unknown gaps", it.unknownGaps.toString(), StatusUnknown)
                 QualityRow("Corrections that protected accuracy", it.corrections.toString(), StatusGood)
                 QualityRow("Unusual records held for review", it.suspiciousHighCount.toString(), StatusUnknown)
+                QualityRow("Records held for clock-integrity review", it.clockAnomalyShiftInterruptedCycles.toString(), StatusUnknown)
 
                 Text(
                     text = "Weak evidence is always shown as weak evidence - the app never presents a strong " +

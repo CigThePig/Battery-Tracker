@@ -59,6 +59,23 @@ class DiagnosticEngineTest {
     }
 
     @Test
+    fun `clock-anomaly shift-interrupted cycles are counted separately from ordinary ones`() {
+        val ordinary = exactCycle(1, RemoteId.WEST, 5 * 3_600_000L, 0L)
+            .copy(classification = RuntimeClassification.SHIFT_INTERRUPTED, includedInPrimaryStatistics = false)
+        val anomalous = exactCycle(1, RemoteId.WEST, 5 * 3_600_000L, 100_000L)
+            .copy(
+                classification = RuntimeClassification.SHIFT_INTERRUPTED,
+                includedInPrimaryStatistics = false,
+                clockAnomalyDetected = true
+            )
+
+        val summary = engine.dataQuality(listOf(ordinary, anomalous), correctionCount = 0)
+
+        assertEquals(2, summary.shiftInterruptedCycles)
+        assertEquals(1, summary.clockAnomalyShiftInterruptedCycles)
+    }
+
+    @Test
     fun `many unknown gaps prevent a strong label even with enough cycles`() {
         val exact = List(70) { exactCycle(1, RemoteId.WEST, 5 * 3_600_000L, it * 100_000L) }
         val unknown = List(80) {

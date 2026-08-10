@@ -110,7 +110,7 @@ private fun EvidenceOverviewCard(quality: DataQualitySummary) {
         else -> null
     }
     val fraction = if (nextTarget == null) 1f else (quality.exactCycles.toFloat() / nextTarget).coerceIn(0f, 1f)
-    val useful = quality.shiftInterruptedCycles + quality.confirmedMinimumObservations
+    val useful = (quality.shiftInterruptedCycles - quality.clockAnomalyShiftInterruptedCycles) + quality.confirmedMinimumObservations
     Surface(
         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
         shape = RoundedCornerShape(18.dp),

@@ -143,7 +143,8 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             recentSummary = latestGroupEvents?.let { buildActionSummary(it, batteries, remotesById) },
             evidenceProgress = EvidenceProgressUiState(
                 exactCycleCount = quality.exactCycles,
-                usefulObservationCount = quality.shiftInterruptedCycles + quality.confirmedMinimumObservations,
+                usefulObservationCount = (quality.shiftInterruptedCycles - quality.clockAnomalyShiftInterruptedCycles) +
+                    quality.confirmedMinimumObservations,
                 qualityLevel = quality.overallLevel,
                 nextExactCycleMilestone = nextEvidenceMilestone(quality.exactCycles)
             ),
@@ -285,7 +286,15 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
             corrected != null -> {
                 val shortName = remotesById[corrected.remoteId]?.shortName ?: return null
-                "GOOD CATCH • $shortName corrected to ${label(corrected.newBatteryId)}"
+                if (corrected.previousBatteryId == null) {
+                    // No prior identity or open interval existed here (e.g. a shift-start
+                    // FIX WEST/EAST on a previously unknown remote) - this sets a fresh
+                    // starting point, not a correction of anything, so it shouldn't claim
+                    // a "catch" was made.
+                    "$shortName ${label(corrected.newBatteryId)} SET"
+                } else {
+                    "GOOD CATCH • $shortName corrected to ${label(corrected.newBatteryId)}"
+                }
             }
 
             confirmations.mapNotNull { it.remoteId }.distinct().size > 1 -> {

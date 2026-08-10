@@ -44,6 +44,14 @@ enum class DataQualityLevel {
 data class DataQualitySummary(
     val exactCycles: Int,
     val shiftInterruptedCycles: Int,
+    /**
+     * Of [shiftInterruptedCycles], how many were downgraded by a wall-clock jump or lost
+     * monotonic timeline rather than a genuine shift-boundary crossing. Their bounds are
+     * computed from untrustworthy timestamps, so unlike an ordinary shift-interrupted
+     * cycle they are not useful partial evidence and must not be added into a "useful"
+     * total.
+     */
+    val clockAnomalyShiftInterruptedCycles: Int,
     /** Cycles with no end evidence at all - genuinely missing data, not incomplete-but-useful data. */
     val unknownGaps: Int,
     /**
