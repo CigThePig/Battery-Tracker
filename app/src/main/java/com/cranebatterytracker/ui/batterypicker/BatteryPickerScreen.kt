@@ -57,8 +57,6 @@ import com.cranebatterytracker.ui.theme.EastAccent
 import com.cranebatterytracker.ui.theme.StatusGood
 import com.cranebatterytracker.ui.theme.StatusWarn
 import com.cranebatterytracker.ui.theme.StatusUnknown
-import com.cranebatterytracker.ui.theme.TrackerBackground
-import com.cranebatterytracker.ui.theme.TrackerSurface
 import com.cranebatterytracker.ui.theme.WestAccent
 import kotlinx.coroutines.delay
 
@@ -236,7 +234,11 @@ private fun EvidenceReceipt(feedback: BatteryChangeFeedback, onDone: () -> Unit)
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(accent.copy(alpha = 0.20f), TrackerBackground, TrackerBackground)
+                    listOf(
+                        accent.copy(alpha = 0.20f),
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.background
+                    )
                 )
             )
             .padding(18.dp),
@@ -301,7 +303,7 @@ private fun BatteryTransferCard(feedback: BatteryChangeFeedback, accent: android
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
-        color = TrackerSurface,
+        color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, accent.copy(alpha = 0.55f)),
         tonalElevation = 6.dp
     ) {

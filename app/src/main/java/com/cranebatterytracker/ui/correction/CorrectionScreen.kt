@@ -43,8 +43,6 @@ import androidx.compose.ui.unit.dp
 import com.cranebatterytracker.ui.common.ErrorBanner
 import com.cranebatterytracker.ui.theme.EastAccent
 import com.cranebatterytracker.ui.theme.StatusGood
-import com.cranebatterytracker.ui.theme.TrackerBackground
-import com.cranebatterytracker.ui.theme.TrackerSurface
 import com.cranebatterytracker.ui.theme.WestAccent
 import kotlinx.coroutines.delay
 
@@ -223,7 +221,13 @@ private fun IntegrityReceipt(feedback: CorrectionFeedback, onDone: () -> Unit) {
 
     Box(
         modifier = Modifier.fillMaxSize().background(
-            Brush.verticalGradient(listOf(accent.copy(alpha = 0.22f), TrackerBackground, TrackerBackground))
+            Brush.verticalGradient(
+                listOf(
+                    accent.copy(alpha = 0.22f),
+                    MaterialTheme.colorScheme.background,
+                    MaterialTheme.colorScheme.background
+                )
+            )
         ).padding(20.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -249,7 +253,7 @@ private fun IntegrityReceipt(feedback: CorrectionFeedback, onDone: () -> Unit) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(22.dp),
-                color = TrackerSurface,
+                color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, accent.copy(alpha = 0.6f))
             ) {
                 Column(

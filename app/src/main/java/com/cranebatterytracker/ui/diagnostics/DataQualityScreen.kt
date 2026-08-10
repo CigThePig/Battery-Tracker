@@ -1,6 +1,8 @@
 package com.cranebatterytracker.ui.diagnostics
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,7 +32,7 @@ fun DataQualityScreen(viewModel: DiagnosticsViewModel, onBack: () -> Unit) {
     val quality = snapshot?.dataQuality
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
             TextButton(onClick = onBack) { Text("← Back") }
             Text(text = "DATA QUALITY", style = MaterialTheme.typography.headlineMedium)
 
