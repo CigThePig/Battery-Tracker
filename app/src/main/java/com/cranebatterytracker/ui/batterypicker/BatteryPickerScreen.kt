@@ -373,7 +373,8 @@ private fun EvidenceValueCard(feedback: BatteryChangeFeedback) {
             detail = partialRuntimeDetail(feedback)
         }
         EvidenceFeedbackKind.RUN_HELD_FOR_REVIEW -> {
-            title = "RUN CAPTURED FOR REVIEW"
+            title = feedback.runtimeMillis?.let { "${formatDurationHoursMinutes(it).uppercase()} RUN CAPTURED FOR REVIEW" }
+                ?: "RUN CAPTURED FOR REVIEW"
             detail = "This unusually long result was preserved, but it will not distort the battery's typical runtime."
         }
         EvidenceFeedbackKind.TRACKING_STARTED -> {

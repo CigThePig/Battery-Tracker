@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
@@ -249,12 +251,15 @@ private fun IntegrityReceipt(feedback: CorrectionFeedback, onDone: () -> Unit) {
         contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().graphicsLayer {
-                alpha = reveal.value
-                translationY = (1f - reveal.value) * 42f
-                scaleX = 0.94f + reveal.value * 0.06f
-                scaleY = 0.94f + reveal.value * 0.06f
-            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .graphicsLayer {
+                    alpha = reveal.value
+                    translationY = (1f - reveal.value) * 42f
+                    scaleX = 0.94f + reveal.value * 0.06f
+                    scaleY = 0.94f + reveal.value * 0.06f
+                },
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
