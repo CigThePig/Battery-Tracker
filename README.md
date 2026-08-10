@@ -23,6 +23,9 @@ Full product/UX/technical specification: [`crane_remote_battery_tracker_complete
   so overnight and weekend gaps can't masquerade as multi-hour runtimes.
 - **Local-only**: no `INTERNET` permission, no accounts, no cloud sync.
   Backups and CSV/SQLite export are local-only (`backup/`).
+- **Visible evidence**: animated, classification-aware save receipts explain what each
+  accurate entry contributed, while fleet and per-battery progress make the growing
+  value of the shared data visible without points, accounts, or operator streaks.
 
 ## Project layout
 

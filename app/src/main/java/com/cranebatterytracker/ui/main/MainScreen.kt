@@ -1,8 +1,15 @@
 package com.cranebatterytracker.ui.main
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,9 +18,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.QueryStats
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -22,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +47,7 @@ import com.cranebatterytracker.ui.common.ErrorBanner
 import com.cranebatterytracker.ui.common.formatSinceLabel
 import com.cranebatterytracker.ui.theme.BatteryNumberStyle
 import com.cranebatterytracker.ui.theme.EastAccent
+import com.cranebatterytracker.ui.theme.StatusGood
 import com.cranebatterytracker.ui.theme.StatusUnknown
 import com.cranebatterytracker.ui.theme.StatusWarn
 import com.cranebatterytracker.ui.theme.WestAccent
@@ -89,6 +104,7 @@ fun MainScreen(
                     accentColor = WestAccent,
                     remoteState = state.west?.state,
                     batteryDisplayNumber = state.west?.batteryDisplayNumber,
+                    activeShiftTracking = state.west?.activeShiftTracking == true,
                     confirmEnabled = !state.busy,
                     onChangeBattery = { onChangeBattery(RemoteId.WEST) },
                     onConfirmStale = { viewModel.confirmStale(RemoteId.WEST) },
@@ -103,6 +119,7 @@ fun MainScreen(
                     accentColor = EastAccent,
                     remoteState = state.east?.state,
                     batteryDisplayNumber = state.east?.batteryDisplayNumber,
+                    activeShiftTracking = state.east?.activeShiftTracking == true,
                     confirmEnabled = !state.busy,
                     onChangeBattery = { onChangeBattery(RemoteId.EAST) },
                     onConfirmStale = { viewModel.confirmStale(RemoteId.EAST) },
@@ -118,6 +135,10 @@ fun MainScreen(
                         state.recentActionGroupId?.let { viewModel.undoActionGroup(it) }
                     }
                 )
+            }
+
+            state.evidenceProgress?.let { progress ->
+                EvidenceStatusStrip(progress = progress, onClick = onOpenDiagnostics)
             }
 
             Row(
@@ -136,20 +157,6 @@ fun MainScreen(
                 }
             }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Button(
-                    onClick = onOpenDiagnostics,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                ) {
-                    Text("BATTERY RESULTS")
-                }
-            }
         }
     }
 }
@@ -162,6 +169,7 @@ private fun RemoteCard(
     accentColor: androidx.compose.ui.graphics.Color,
     remoteState: RemoteState?,
     batteryDisplayNumber: Int?,
+    activeShiftTracking: Boolean,
     confirmEnabled: Boolean,
     onChangeBattery: () -> Unit,
     onConfirmStale: () -> Unit,
@@ -171,6 +179,7 @@ private fun RemoteCard(
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
         tonalElevation = 2.dp
     ) {
         Column(
@@ -204,6 +213,7 @@ private fun RemoteCard(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    TrackingPulse(active = activeShiftTracking, accentColor = accentColor)
                 }
 
                 is RemoteState.Stale -> {
@@ -264,6 +274,92 @@ private fun RemoteCard(
                     text = if (isDead) "CHANGE\nBATTERY" else "SET\nBATTERY",
                     textAlign = TextAlign.Center,
                     fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrackingPulse(active: Boolean, accentColor: androidx.compose.ui.graphics.Color) {
+    val transition = rememberInfiniteTransition(label = "tracking pulse")
+    val pulseAlpha by transition.animateFloat(
+        initialValue = 0.38f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(1_050), repeatMode = RepeatMode.Reverse),
+        label = "tracking pulse alpha"
+    )
+    Row(
+        modifier = Modifier.padding(top = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background((if (active) StatusGood else accentColor).copy(alpha = if (active) pulseAlpha else 0.55f))
+        )
+        Text(
+            text = if (active) "DATA TRACKING ACTIVE" else "STATE CONFIRMED",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (active) StatusGood else MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun EvidenceStatusStrip(progress: EvidenceProgressUiState, onClick: () -> Unit) {
+    val nextTarget = progress.nextExactCycleMilestone
+    val fraction = if (nextTarget == null) 1f else (progress.exactCycleCount.toFloat() / nextTarget).coerceIn(0f, 1f)
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, StatusGood.copy(alpha = 0.42f)),
+        tonalElevation = 3.dp
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(shape = CircleShape, color = StatusGood.copy(alpha = 0.14f)) {
+                Icon(
+                    Icons.Rounded.QueryStats,
+                    contentDescription = null,
+                    tint = StatusGood,
+                    modifier = Modifier.padding(9.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("BATTERY EVIDENCE", style = MaterialTheme.typography.labelLarge)
+                    Text(progress.qualityLevel.name, style = MaterialTheme.typography.labelLarge, color = StatusGood)
+                }
+                Text(
+                    text = buildString {
+                        append(progress.exactCycleCount)
+                        append(if (progress.exactCycleCount == 1) " EXACT RUN" else " EXACT RUNS")
+                        if (progress.usefulObservationCount > 0) append(" • ${progress.usefulObservationCount} PARTIAL")
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LinearProgressIndicator(
+                    progress = fraction,
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(5.dp).clip(CircleShape),
+                    color = StatusGood,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+                Text(
+                    text = if (nextTarget == null) "STRONG EVIDENCE BUILT • VIEW RESULTS →"
+                    else "NEXT EVIDENCE MILESTONE: $nextTarget EXACT RUNS • VIEW →",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StatusGood,
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
         }

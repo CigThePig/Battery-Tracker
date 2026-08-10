@@ -1,14 +1,24 @@
 package com.cranebatterytracker.ui.diagnostics
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.QueryStats
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -17,11 +27,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.cranebatterytracker.backup.BackupStatus
 import com.cranebatterytracker.domain.model.BatteryHealth
 import com.cranebatterytracker.domain.model.BatteryTrend
+import com.cranebatterytracker.domain.model.DataQualitySummary
 import com.cranebatterytracker.ui.common.formatDurationHoursMinutes
+import com.cranebatterytracker.ui.feedback.EvidenceFeedbackFactory
 import com.cranebatterytracker.ui.theme.StatusBad
 import com.cranebatterytracker.ui.theme.StatusGood
 import com.cranebatterytracker.ui.theme.StatusUnknown
@@ -49,6 +63,8 @@ fun DiagnosticsOverviewScreen(
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(text = "BATTERY RESULTS", style = MaterialTheme.typography.headlineMedium)
             BackupStatusRow(backupStatus)
+
+            snapshot?.dataQuality?.let { quality -> EvidenceOverviewCard(quality) }
 
             LazyColumn(
                 modifier = Modifier.weight(1f).padding(vertical = 12.dp),
@@ -78,6 +94,58 @@ fun DiagnosticsOverviewScreen(
                 Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
                     Text("BACK TO TRACKER")
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EvidenceOverviewCard(quality: DataQualitySummary) {
+    val nextTarget = when {
+        quality.exactCycles < 10 -> 10
+        quality.exactCycles < 30 -> 30
+        quality.exactCycles < 60 -> 60
+        else -> null
+    }
+    val fraction = if (nextTarget == null) 1f else (quality.exactCycles.toFloat() / nextTarget).coerceIn(0f, 1f)
+    val useful = quality.shiftInterruptedCycles + quality.confirmedMinimumObservations
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = StatusGood.copy(alpha = 0.09f),
+        border = BorderStroke(1.dp, StatusGood.copy(alpha = 0.45f))
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(shape = CircleShape, color = StatusGood.copy(alpha = 0.14f)) {
+                Icon(Icons.Rounded.QueryStats, contentDescription = null, tint = StatusGood, modifier = Modifier.padding(10.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("BATTERY EVIDENCE", style = MaterialTheme.typography.titleMedium)
+                    Text(quality.overallLevel.name, style = MaterialTheme.typography.labelLarge, color = StatusGood)
+                }
+                Text(
+                    "${quality.exactCycles} exact runs • $useful useful partial observations",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                LinearProgressIndicator(
+                    progress = fraction,
+                    modifier = Modifier.fillMaxWidth().padding(top = 9.dp).height(7.dp).clip(CircleShape),
+                    color = StatusGood,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+                Text(
+                    if (nextTarget == null) "Strong evidence has been built across the battery fleet."
+                    else "Every accurate change moves the fleet toward $nextTarget exact runs.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StatusGood,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
             }
         }
     }
@@ -131,26 +199,71 @@ private fun BatteryOverviewCard(health: BatteryHealth, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, trendColor(health.trend).copy(alpha = 0.30f)),
         onClick = onClick,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(text = "BATTERY ${health.displayNumber}", style = MaterialTheme.typography.titleLarge)
-            Text(
-                text = "Typical: ${health.lifetimeReliableMedianMillis?.let(::formatDurationHoursMinutes) ?: "--"}",
-                style = MaterialTheme.typography.bodyLarge
-            )
+            if (health.reliableCycleCount < EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET) {
+                BatteryEvidenceDots(health.reliableCycleCount)
+                Text(
+                    text = "${EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET - health.reliableCycleCount} more reliable " +
+                        if (EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET - health.reliableCycleCount == 1) "run to first baseline" else "runs to first baseline",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StatusGood,
+                    modifier = Modifier.padding(top = 5.dp)
+                )
+            } else {
+                Text(
+                    text = "✓ BASELINE READY",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = StatusGood,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+                Text(
+                    text = "Typical runtime: ${health.lifetimeReliableMedianMillis?.let(::formatDurationHoursMinutes) ?: "--"}",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
             Text(
                 text = trendLabel(health.trend),
                 style = MaterialTheme.typography.bodyLarge,
                 color = trendColor(health.trend)
             )
             Text(
-                text = "${health.reliableCycleCount} reliable cycles",
+                text = "${health.reliableCycleCount} reliable ${if (health.reliableCycleCount == 1) "run" else "runs"} captured",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Composable
+private fun BatteryEvidenceDots(reliableCount: Int) {
+    Row(
+        modifier = Modifier.padding(top = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        repeat(EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET) { index ->
+            Box(
+                modifier = Modifier
+                    .size(13.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (index < reliableCount) StatusGood
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    )
+            )
+        }
+        Text(
+            "$reliableCount / ${EvidenceFeedbackFactory.BASELINE_CYCLE_TARGET}",
+            style = MaterialTheme.typography.labelLarge,
+            color = StatusGood,
+            modifier = Modifier.padding(start = 3.dp)
+        )
     }
 }
 

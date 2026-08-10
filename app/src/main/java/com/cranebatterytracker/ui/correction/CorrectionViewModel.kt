@@ -20,6 +20,17 @@ import kotlinx.coroutines.launch
 
 data class CollisionPrompt(val batteryId: Int, val batteryDisplayNumber: Int, val otherRemoteShortName: String)
 
+enum class CorrectionFeedbackKind { CONFIRMED, CORRECTED, MARKED_UNKNOWN, COLLISION_RESOLVED }
+
+data class CorrectionFeedback(
+    val kind: CorrectionFeedbackKind,
+    val remoteId: RemoteId,
+    val remoteDisplayName: String,
+    val previousBatteryDisplayNumber: Int?,
+    val newBatteryDisplayNumber: Int? = null,
+    val otherRemoteShortName: String? = null
+)
+
 data class CorrectionUiState(
     val loading: Boolean = true,
     val remoteDisplayName: String = "",
@@ -27,14 +38,14 @@ data class CorrectionUiState(
     val batteries: List<Battery> = emptyList(),
     val pendingCollision: CollisionPrompt? = null,
     val submitting: Boolean = false,
-    val done: Boolean = false,
+    val feedback: CorrectionFeedback? = null,
     val errorMessage: String? = null
 )
 
 private data class LocalUiState(
     val pendingCollision: CollisionPrompt? = null,
     val submitting: Boolean = false,
-    val done: Boolean = false,
+    val feedback: CorrectionFeedback? = null,
     val errorMessage: String? = null
 )
 
@@ -75,7 +86,7 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
             batteries = data.batteries,
             pendingCollision = local.pendingCollision,
             submitting = local.submitting,
-            done = local.done,
+            feedback = local.feedback,
             errorMessage = local.errorMessage
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CorrectionUiState())
@@ -84,10 +95,27 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
         if (localState.value.submitting) return
         viewModelScope.launch {
             localState.value = localState.value.copy(submitting = true)
+            val snapshot = uiState.value
             runCatching {
                 container.correctStateUseCase(remoteId, batteryId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
             }
-                .onSuccess { localState.value = localState.value.copy(submitting = false, done = true) }
+                .onSuccess {
+                    val newNumber = snapshot.batteries.firstOrNull { it.batteryId == batteryId }?.displayNumber ?: batteryId
+                    localState.value = localState.value.copy(
+                        submitting = false,
+                        feedback = CorrectionFeedback(
+                            kind = if (snapshot.currentBatteryDisplayNumber == newNumber) {
+                                CorrectionFeedbackKind.CONFIRMED
+                            } else {
+                                CorrectionFeedbackKind.CORRECTED
+                            },
+                            remoteId = remoteId,
+                            remoteDisplayName = snapshot.remoteDisplayName,
+                            previousBatteryDisplayNumber = snapshot.currentBatteryDisplayNumber,
+                            newBatteryDisplayNumber = newNumber
+                        )
+                    )
+                }
                 .onFailure { error ->
                     if (error is BatteryTrackerException.BatteryOwnedByOtherRemote) {
                         val otherShortName = remotesCache.firstOrNull { it.remoteId == error.otherRemote }?.shortName
@@ -112,6 +140,7 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
         if (localState.value.submitting) return
         viewModelScope.launch {
             localState.value = localState.value.copy(submitting = true)
+            val snapshot = uiState.value
             runCatching {
                 container.correctStateUseCase(
                     remoteId,
@@ -120,7 +149,20 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
                     resolveCollision = true
                 )
             }
-                .onSuccess { localState.value = localState.value.copy(submitting = false, pendingCollision = null, done = true) }
+                .onSuccess {
+                    localState.value = localState.value.copy(
+                        submitting = false,
+                        pendingCollision = null,
+                        feedback = CorrectionFeedback(
+                            kind = CorrectionFeedbackKind.COLLISION_RESOLVED,
+                            remoteId = remoteId,
+                            remoteDisplayName = snapshot.remoteDisplayName,
+                            previousBatteryDisplayNumber = snapshot.currentBatteryDisplayNumber,
+                            newBatteryDisplayNumber = prompt.batteryDisplayNumber,
+                            otherRemoteShortName = prompt.otherRemoteShortName
+                        )
+                    )
+                }
                 .onFailure { localState.value = localState.value.copy(submitting = false, errorMessage = it.message) }
         }
     }
@@ -133,10 +175,21 @@ class CorrectionViewModel(private val container: AppContainer, private val remot
         if (localState.value.submitting) return
         viewModelScope.launch {
             localState.value = localState.value.copy(submitting = true)
+            val snapshot = uiState.value
             runCatching {
                 container.markUnknownUseCase(remoteId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
             }
-                .onSuccess { localState.value = localState.value.copy(submitting = false, done = true) }
+                .onSuccess {
+                    localState.value = localState.value.copy(
+                        submitting = false,
+                        feedback = CorrectionFeedback(
+                            kind = CorrectionFeedbackKind.MARKED_UNKNOWN,
+                            remoteId = remoteId,
+                            remoteDisplayName = snapshot.remoteDisplayName,
+                            previousBatteryDisplayNumber = snapshot.currentBatteryDisplayNumber
+                        )
+                    )
+                }
                 .onFailure { localState.value = localState.value.copy(submitting = false, errorMessage = it.message) }
         }
     }

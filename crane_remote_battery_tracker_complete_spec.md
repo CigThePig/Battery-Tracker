@@ -413,6 +413,32 @@ This should display briefly, then return automatically to the main screen.
 
 No additional OK button should be required.
 
+## 13.1 Evidence Receipt and Rewarding Feedback
+
+Saving must make the value of an accurate entry visible instead of behaving like a black box.
+
+After a battery selection, the app briefly presents a full-screen **evidence receipt** that shows:
+
+1. the physical state change that was recorded;
+2. the runtime evidence, if any, created by the removed battery;
+3. the number of reliable runs now available for that battery;
+4. progress toward its first trustworthy baseline;
+5. any real diagnostic milestone unlocked by the entry.
+
+Feedback must remain evidence-aware:
+
+- exact non-outlier cycles may be described as reliable runs;
+- shift-interrupted cycles are described as useful partial observations;
+- suspicious-high cycles are preserved for review, not celebrated as reliable;
+- setting a previously unknown remote only says that accurate tracking has started;
+- corrections and explicit unknown states receive positive feedback for protecting accuracy.
+
+The interaction should use a short entrance animation, West/East accent lighting, and one crisp haptic confirmation. It should return automatically to the tracker after the information can be read. Genuine milestones may remain visible slightly longer than ordinary saves.
+
+The app may celebrate meaningful diagnostic progress such as a first reliable run, a five-run battery baseline, or an improved overall data-quality level. It must not award arbitrary points, maintain operator streaks, use leaderboards, or create any incentive to enter events that did not happen.
+
+The main screen and Battery Results screen should keep accumulated evidence visible through exact-run counts, data-quality status, battery baseline progress, and active confirmed-state indicators.
+
 ---
 
 # 14. Human Reliability Must Not Be Assumed

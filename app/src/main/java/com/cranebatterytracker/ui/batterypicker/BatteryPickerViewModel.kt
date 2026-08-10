@@ -4,21 +4,24 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.cranebatterytracker.di.AppContainer
+import com.cranebatterytracker.domain.analysis.EventFiltering
 import com.cranebatterytracker.domain.analysis.EventReducer
 import com.cranebatterytracker.domain.model.Battery
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.domain.model.RemoteKnowledge
 import com.cranebatterytracker.domain.model.other
+import com.cranebatterytracker.ui.feedback.BatteryChangeFeedback
+import com.cranebatterytracker.ui.feedback.EvidenceFeedbackFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-data class SavedResult(val fromDisplayNumber: Int?, val toDisplayNumber: Int)
-
 data class BatteryPickerUiState(
     val loading: Boolean = true,
+    val remoteId: RemoteId = RemoteId.WEST,
     val remoteDisplayName: String = "",
     val remoteShortName: String = "",
     val currentBatteryId: Int? = null,
@@ -27,13 +30,13 @@ data class BatteryPickerUiState(
     val unavailableBatteryDisplayNumber: Int? = null,
     val otherRemoteShortName: String? = null,
     val batteries: List<Battery> = emptyList(),
-    val saved: SavedResult? = null,
+    val saved: BatteryChangeFeedback? = null,
     val submitting: Boolean = false,
     val errorMessage: String? = null
 )
 
 private data class LocalUiState(
-    val saved: SavedResult? = null,
+    val saved: BatteryChangeFeedback? = null,
     val submitting: Boolean = false,
     val errorMessage: String? = null
 )
@@ -66,6 +69,7 @@ class BatteryPickerViewModel(private val container: AppContainer, private val re
 
         BatteryPickerUiState(
             loading = false,
+            remoteId = remoteId,
             remoteDisplayName = configuredDisplayName(remoteId, data.settings) ?: remote?.displayName ?: "",
             remoteShortName = remote?.shortName ?: "",
             currentBatteryId = currentBatteryId,
@@ -94,15 +98,34 @@ class BatteryPickerViewModel(private val container: AppContainer, private val re
         if (localState.value.submitting) return
         viewModelScope.launch {
             localState.value = localState.value.copy(submitting = true)
-            val snapshot = uiState.value
+            val data = dataState.first()
+            val knowledge = EventReducer.reduce(data.events)
+            val currentBatteryId = (knowledge[remoteId] as? RemoteKnowledge.Known)?.batteryId
+            val batteriesById = data.batteries.associateBy(Battery::batteryId)
+            val beforeCycles = container.runtimeAnalysisEngine(data.settings).deriveCycles(data.events)
+            val beforeQuality = qualityFor(beforeCycles, data.events)
             runCatching {
                 container.batteryChangeUseCase(remoteId, batteryId, elapsedRealtimeMillis = SystemClock.elapsedRealtime())
             }
                 .onSuccess {
-                    val toNumber = snapshot.batteries.firstOrNull { it.batteryId == batteryId }?.displayNumber ?: batteryId
+                    val updatedEvents = container.repository.currentEventsSnapshot()
+                    val afterCycles = container.runtimeAnalysisEngine(data.settings).deriveCycles(updatedEvents)
+                    val afterQuality = qualityFor(afterCycles, updatedEvents)
+                    val toNumber = batteriesById[batteryId]?.displayNumber ?: batteryId
+                    val remoteShortName = data.remotes.firstOrNull { it.remoteId == remoteId }?.shortName ?: remoteId.name
                     localState.value = localState.value.copy(
                         submitting = false,
-                        saved = SavedResult(snapshot.currentBatteryDisplayNumber, toNumber)
+                        saved = EvidenceFeedbackFactory.create(
+                            remoteId = remoteId,
+                            remoteShortName = remoteShortName,
+                            fromBatteryId = currentBatteryId,
+                            fromDisplayNumber = currentBatteryId?.let { batteriesById[it]?.displayNumber },
+                            toDisplayNumber = toNumber,
+                            beforeCycles = beforeCycles,
+                            afterCycles = afterCycles,
+                            beforeQuality = beforeQuality,
+                            afterQuality = afterQuality
+                        )
                     )
                 }
                 .onFailure { error ->
@@ -118,4 +141,14 @@ class BatteryPickerViewModel(private val container: AppContainer, private val re
     fun consumeError() {
         localState.value = localState.value.copy(errorMessage = null)
     }
+
+    private fun qualityFor(
+        cycles: List<com.cranebatterytracker.domain.model.DerivedCycle>,
+        events: List<com.cranebatterytracker.domain.model.DomainEvent>
+    ) = container.diagnosticEngine.dataQuality(
+        cycles = cycles,
+        correctionCount = container.diagnosticEngine.correctionCount(
+            EventFiltering.effectiveChronologicalEvents(events)
+        )
+    ).overallLevel
 }
