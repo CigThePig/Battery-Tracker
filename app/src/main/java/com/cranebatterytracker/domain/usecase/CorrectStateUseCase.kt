@@ -155,7 +155,12 @@ class CorrectStateUseCase(
             }
 
             repository.writeEventGroup(events)
-            CorrectStateResult(clockAnomalyDetected = anomalyDetected || monotonicContinuityBroken)
+            // Unlike the same-battery confirmation above, this opens a brand-new interval
+            // starting at `now` (see RuntimeAnalysisEngine's STATE_CORRECTED handling) - a
+            // monotonic-only break says continuity was lost *before* this event, which
+            // doesn't taint an interval that runs entirely on the post-reboot clock going
+            // forward. Only a wall-clock jump makes this event's own start time untrustworthy.
+            CorrectStateResult(clockAnomalyDetected = anomalyDetected)
         }
     }
 }

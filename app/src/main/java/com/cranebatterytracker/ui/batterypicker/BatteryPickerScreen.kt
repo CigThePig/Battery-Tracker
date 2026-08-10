@@ -441,6 +441,8 @@ private fun partialRuntimeDetail(feedback: BatteryChangeFeedback): String {
         } else {
             "${formatDurationHoursMinutes(minimum)} was observed. The shift boundary keeps it out of the exact average."
         }
+    } else if (feedback.clockAnomalyDetected) {
+        "A clock irregularity was detected, so this observation's duration could not be trusted and was not averaged in."
     } else {
         "${formatDurationHoursMinutes(minimum)}–${formatDurationHoursMinutes(maximum)} active runtime was preserved without guessing."
     }
