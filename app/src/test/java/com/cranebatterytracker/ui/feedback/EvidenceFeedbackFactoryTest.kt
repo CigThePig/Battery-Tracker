@@ -5,6 +5,7 @@ import com.cranebatterytracker.domain.model.DerivedCycle
 import com.cranebatterytracker.domain.model.RemoteId
 import com.cranebatterytracker.domain.model.RuntimeClassification
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -117,6 +118,26 @@ class EvidenceFeedbackFactoryTest {
         assertEquals(EvidenceFeedbackKind.TRACKING_STARTED, feedback.kind)
         assertNull(feedback.runtimeMillis)
         assertTrue(feedback.milestone == null)
+        assertFalse(feedback.clockAnomalyDetected)
+    }
+
+    @Test
+    fun `tracking started under a clock anomaly is not promised as a trustworthy starting point`() {
+        val feedback = EvidenceFeedbackFactory.create(
+            remoteId = RemoteId.WEST,
+            remoteShortName = "West",
+            fromBatteryId = null,
+            fromDisplayNumber = null,
+            toDisplayNumber = 4,
+            beforeCycles = emptyList(),
+            afterCycles = emptyList(),
+            beforeQuality = DataQualityLevel.LIMITED,
+            afterQuality = DataQualityLevel.LIMITED,
+            newIntervalClockAnomalyDetected = true
+        )
+
+        assertEquals(EvidenceFeedbackKind.TRACKING_STARTED, feedback.kind)
+        assertTrue(feedback.clockAnomalyDetected)
     }
 
     private fun create(before: List<DerivedCycle>, after: List<DerivedCycle>) = EvidenceFeedbackFactory.create(

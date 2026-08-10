@@ -200,7 +200,11 @@ private fun IntegrityReceipt(feedback: CorrectionFeedback, onDone: () -> Unit) {
         CorrectionFeedbackKind.TRACKING_STARTED -> {
             headline = "TRACKING STARTED"
             stateLine = "${feedback.remoteDisplayName.uppercase()} NOW SHOWS BATTERY ${feedback.newBatteryDisplayNumber}"
-            detail = "This confirmed state gives the next battery change a trustworthy starting point."
+            detail = if (feedback.clockAnomalyDetected) {
+                "This state was saved, but a clock irregularity keeps it from being a fully trustworthy starting point yet."
+            } else {
+                "This confirmed state gives the next battery change a trustworthy starting point."
+            }
         }
         CorrectionFeedbackKind.CONFIRMED -> {
             headline = "STATE CONFIRMED"
@@ -214,7 +218,11 @@ private fun IntegrityReceipt(feedback: CorrectionFeedback, onDone: () -> Unit) {
         CorrectionFeedbackKind.CORRECTED -> {
             headline = "GOOD CATCH"
             stateLine = "${feedback.remoteDisplayName.uppercase()} NOW MATCHES BATTERY ${feedback.newBatteryDisplayNumber}"
-            detail = "An inaccurate runtime was prevented. Trustworthy tracking starts from this correction."
+            detail = if (feedback.clockAnomalyDetected) {
+                "An inaccurate runtime was prevented, but a clock irregularity keeps this from being a trustworthy starting point yet."
+            } else {
+                "An inaccurate runtime was prevented. Trustworthy tracking starts from this correction."
+            }
         }
         CorrectionFeedbackKind.MARKED_UNKNOWN -> {
             headline = "NO GUESS ADDED"

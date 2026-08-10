@@ -377,8 +377,12 @@ private fun EvidenceValueCard(feedback: BatteryChangeFeedback) {
             detail = "This unusually long result was preserved, but it will not distort the battery's typical runtime."
         }
         EvidenceFeedbackKind.TRACKING_STARTED -> {
-            title = "ACCURATE TRACKING STARTED"
-            detail = "This confirmed state gives the next battery change a trustworthy starting point."
+            title = if (feedback.clockAnomalyDetected) "TRACKING STARTED" else "ACCURATE TRACKING STARTED"
+            detail = if (feedback.clockAnomalyDetected) {
+                "This state was saved, but a clock irregularity keeps it from being a fully trustworthy starting point yet."
+            } else {
+                "This confirmed state gives the next battery change a trustworthy starting point."
+            }
         }
     }
 

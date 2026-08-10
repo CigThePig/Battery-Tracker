@@ -289,12 +289,20 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             }
 
             confirmations.mapNotNull { it.remoteId }.distinct().size > 1 -> {
-                "BOTH REMOTES CONFIRMED • SHIFT TRACKING PROTECTED"
+                if (confirmations.any { it.wallClockAnomalyDetected || it.monotonicContinuityBroken }) {
+                    "BOTH REMOTES CONFIRMED • CLOCK IRREGULARITY DETECTED"
+                } else {
+                    "BOTH REMOTES CONFIRMED • SHIFT TRACKING PROTECTED"
+                }
             }
 
             confirmed != null -> {
                 val shortName = remotesById[confirmed.remoteId]?.shortName ?: return null
-                "$shortName ${label(confirmed.batteryId)} CONFIRMED • TRACKING PROTECTED"
+                if (confirmed.wallClockAnomalyDetected || confirmed.monotonicContinuityBroken) {
+                    "$shortName ${label(confirmed.batteryId)} CONFIRMED • CLOCK IRREGULARITY DETECTED"
+                } else {
+                    "$shortName ${label(confirmed.batteryId)} CONFIRMED • TRACKING PROTECTED"
+                }
             }
 
             markedUnknown != null -> {

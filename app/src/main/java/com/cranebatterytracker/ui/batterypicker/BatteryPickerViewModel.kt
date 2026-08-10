@@ -109,7 +109,8 @@ class BatteryPickerViewModel(private val container: AppContainer, private val re
             }
                 .onSuccess {
                     val updatedEvents = container.repository.currentEventsSnapshot()
-                    val afterCycles = container.runtimeAnalysisEngine(data.settings).deriveCycles(updatedEvents)
+                    val runtimeAnalysisEngine = container.runtimeAnalysisEngine(data.settings)
+                    val afterCycles = runtimeAnalysisEngine.deriveCycles(updatedEvents)
                     val afterQuality = qualityFor(afterCycles, updatedEvents)
                     val toNumber = batteriesById[batteryId]?.displayNumber ?: batteryId
                     val remoteShortName = data.remotes.firstOrNull { it.remoteId == remoteId }?.shortName ?: remoteId.name
@@ -124,7 +125,8 @@ class BatteryPickerViewModel(private val container: AppContainer, private val re
                             beforeCycles = beforeCycles,
                             afterCycles = afterCycles,
                             beforeQuality = beforeQuality,
-                            afterQuality = afterQuality
+                            afterQuality = afterQuality,
+                            newIntervalClockAnomalyDetected = runtimeAnalysisEngine.openIntervalClockAnomalies(updatedEvents)[remoteId] == true
                         )
                     )
                 }

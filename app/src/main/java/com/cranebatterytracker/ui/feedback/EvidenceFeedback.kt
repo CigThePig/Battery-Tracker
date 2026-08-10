@@ -52,7 +52,11 @@ object EvidenceFeedbackFactory {
         beforeCycles: List<DerivedCycle>,
         afterCycles: List<DerivedCycle>,
         beforeQuality: DataQualityLevel,
-        afterQuality: DataQualityLevel
+        afterQuality: DataQualityLevel,
+        // Whether the interval this change just opened is itself clock-tainted (a wall-clock
+        // jump or lost monotonic timeline touched the install), separate from completedCycle's
+        // taint since a TRACKING_STARTED receipt has no completed cycle to check.
+        newIntervalClockAnomalyDetected: Boolean = false
     ): BatteryChangeFeedback {
         if (fromBatteryId == null || fromDisplayNumber == null) {
             return BatteryChangeFeedback(
@@ -60,7 +64,8 @@ object EvidenceFeedbackFactory {
                 remoteShortName = remoteShortName,
                 fromDisplayNumber = null,
                 toDisplayNumber = toDisplayNumber,
-                kind = EvidenceFeedbackKind.TRACKING_STARTED
+                kind = EvidenceFeedbackKind.TRACKING_STARTED,
+                clockAnomalyDetected = newIntervalClockAnomalyDetected
             )
         }
 
@@ -112,7 +117,11 @@ object EvidenceFeedbackFactory {
             batteryDisplayNumber = fromDisplayNumber,
             reliableCycleCount = afterReliableCount,
             milestone = milestone,
-            clockAnomalyDetected = completedCycle?.clockAnomalyDetected == true
+            clockAnomalyDetected = if (kind == EvidenceFeedbackKind.TRACKING_STARTED) {
+                newIntervalClockAnomalyDetected
+            } else {
+                completedCycle?.clockAnomalyDetected == true
+            }
         )
     }
 
